@@ -1,0 +1,74 @@
+2025-04-22 12:19:48,272 - RLAlgorithmComparator - INFO - 初始化RL算法比较器，结果将保存在 results/analysis
+2025-04-22 12:19:48,272 - RLAlgorithmComparator - INFO - 在 results 中找到 4 个训练结果文件
+2025-04-22 12:19:48,272 - RLAlgorithmComparator - INFO - 添加了算法: PPO
+2025-04-22 12:19:48,273 - RLAlgorithmComparator - INFO - 从 results/ppo_training_data_default.json 加载了 PPO 的数据
+2025-04-22 12:19:48,273 - RLAlgorithmComparator - INFO - 添加了算法: DQN
+2025-04-22 12:19:48,275 - RLAlgorithmComparator - INFO - 从 results/dqn_training_data_default.json 加载了 DQN 的数据
+2025-04-22 12:19:48,275 - RLAlgorithmComparator - INFO - 添加了算法: Prioritize_DDPG
+2025-04-22 12:19:48,276 - RLAlgorithmComparator - INFO - 从 results/training_data_default.json 加载了 Prioritize_DDPG 的数据
+2025-04-22 12:19:48,276 - RLAlgorithmComparator - INFO - 添加了算法: DDPG
+2025-04-22 12:19:48,279 - RLAlgorithmComparator - INFO - 从 results/ddpg_training_data_default.json 加载了 DDPG 的数据
+2025-04-22 12:19:48,287 - RLAlgorithmComparator - INFO - 结果已保存到 results/analysis/comparison_results.json
+2025-04-22 12:19:49,233 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/rewards_learning_curve.png
+2025-04-22 12:19:50,046 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/delays_learning_curve.png
+2025-04-22 12:19:50,900 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/energies_learning_curve.png
+2025-04-22 12:19:51,718 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/success_rates_learning_curve.png
+2025-04-22 12:19:51,732 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-22 12:19:52,247 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/rewards_avg_bar_chart.png
+2025-04-22 12:19:52,260 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-22 12:19:52,774 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/delays_avg_bar_chart.png
+2025-04-22 12:19:52,789 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-22 12:19:53,318 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/energies_avg_bar_chart.png
+2025-04-22 12:19:53,331 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-22 12:19:53,852 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/success_rates_avg_bar_chart.png
+2025-04-22 12:19:53,853 - RLAlgorithmComparator - INFO - 比较报告已保存到 results/analysis/algorithm_comparison_report.md
+2025-04-23 12:57:52,026 - RLAlgorithmComparator - INFO - 初始化RL算法比较器，结果将保存在 results/analysis
+2025-04-23 12:57:52,027 - RLAlgorithmComparator - INFO - 在 results 中找到 5 个训练结果文件
+2025-04-23 12:57:52,027 - RLAlgorithmComparator - INFO - 添加了算法: PPO
+2025-04-23 12:57:52,028 - RLAlgorithmComparator - INFO - 从 results/ppo_training_data_default.json 加载了 PPO 的数据
+2025-04-23 12:57:52,028 - RLAlgorithmComparator - INFO - 添加了算法: DQN
+2025-04-23 12:57:52,031 - RLAlgorithmComparator - INFO - 从 results/dqn_training_data_default.json 加载了 DQN 的数据
+2025-04-23 12:57:52,031 - RLAlgorithmComparator - INFO - 添加了算法: Prioritize_DDPG
+2025-04-23 12:57:52,033 - RLAlgorithmComparator - INFO - 从 results/training_data_default.json 加载了 Prioritize_DDPG 的数据
+2025-04-23 12:57:52,033 - RLAlgorithmComparator - INFO - 添加了算法: DDPG
+2025-04-23 12:57:52,036 - RLAlgorithmComparator - INFO - 从 results/ddpg_training_data_default.json 加载了 DDPG 的数据
+2025-04-23 12:57:52,036 - RLAlgorithmComparator - WARNING - 无法确定算法名称: priddpg_training_data_default.json
+2025-04-23 12:57:52,048 - RLAlgorithmComparator - INFO - 结果已保存到 results/analysis/comparison_results.json
+2025-04-23 12:57:52,913 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/rewards_learning_curve.png
+2025-04-23 12:57:53,700 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/delays_learning_curve.png
+2025-04-23 12:57:54,507 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/energies_learning_curve.png
+2025-04-23 12:57:55,286 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/success_rates_learning_curve.png
+2025-04-23 12:57:55,300 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-23 12:57:55,817 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/rewards_avg_bar_chart.png
+2025-04-23 12:57:55,833 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-23 12:57:56,344 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/delays_avg_bar_chart.png
+2025-04-23 12:57:56,357 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-23 12:57:56,877 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/energies_avg_bar_chart.png
+2025-04-23 12:57:56,890 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-23 12:57:57,405 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/success_rates_avg_bar_chart.png
+2025-04-23 12:57:57,406 - RLAlgorithmComparator - INFO - 比较报告已保存到 results/analysis/algorithm_comparison_report.md
+2025-04-23 12:59:35,684 - RLAlgorithmComparator - INFO - 初始化RL算法比较器，结果将保存在 results/analysis
+2025-04-23 12:59:35,685 - RLAlgorithmComparator - INFO - 在 results 中找到 5 个训练结果文件
+2025-04-23 12:59:35,685 - RLAlgorithmComparator - INFO - 添加了算法: PPO
+2025-04-23 12:59:35,686 - RLAlgorithmComparator - INFO - 从 results/ppo_training_data_default.json 加载了 PPO 的数据
+2025-04-23 12:59:35,686 - RLAlgorithmComparator - INFO - 添加了算法: DQN
+2025-04-23 12:59:35,688 - RLAlgorithmComparator - INFO - 从 results/dqn_training_data_default.json 加载了 DQN 的数据
+2025-04-23 12:59:35,689 - RLAlgorithmComparator - INFO - 添加了算法: Prioritize_DDPG
+2025-04-23 12:59:35,690 - RLAlgorithmComparator - INFO - 从 results/training_data_default.json 加载了 Prioritize_DDPG 的数据
+2025-04-23 12:59:35,690 - RLAlgorithmComparator - INFO - 添加了算法: DDPG
+2025-04-23 12:59:35,693 - RLAlgorithmComparator - INFO - 从 results/ddpg_training_data_default.json 加载了 DDPG 的数据
+2025-04-23 12:59:35,693 - RLAlgorithmComparator - WARNING - 无法确定算法名称: priddpg_training_data_default.json
+2025-04-23 12:59:35,705 - RLAlgorithmComparator - INFO - 结果已保存到 results/analysis/comparison_results.json
+2025-04-23 12:59:36,570 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/rewards_learning_curve.png
+2025-04-23 12:59:37,366 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/delays_learning_curve.png
+2025-04-23 12:59:38,184 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/energies_learning_curve.png
+2025-04-23 12:59:38,962 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/success_rates_learning_curve.png
+2025-04-23 12:59:38,975 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-23 12:59:39,491 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/rewards_avg_bar_chart.png
+2025-04-23 12:59:39,504 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-23 12:59:40,015 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/delays_avg_bar_chart.png
+2025-04-23 12:59:40,028 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-23 12:59:40,548 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/energies_avg_bar_chart.png
+2025-04-23 12:59:40,561 - matplotlib.legend - WARNING - No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+2025-04-23 12:59:41,076 - RLAlgorithmComparator - INFO - 图表已保存到 results/analysis/success_rates_avg_bar_chart.png
+2025-04-23 12:59:41,077 - RLAlgorithmComparator - INFO - 比较报告已保存到 results/analysis/algorithm_comparison_report.md

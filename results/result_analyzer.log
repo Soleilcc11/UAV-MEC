@@ -1,0 +1,123 @@
+2025-04-22 11:47:41,429 - ResultAnalyzer - INFO - Initialized ResultAnalyzer with results_dir=results, output_dir=results/analysis
+2025-04-22 11:47:41,429 - ResultAnalyzer - INFO - Found 4 JSON files
+2025-04-22 11:47:41,429 - ResultAnalyzer - INFO - Loading data from results/ppo_training_data_default.json
+2025-04-22 11:47:41,431 - ResultAnalyzer - INFO - Loaded data for default_PPO: 1000 records
+2025-04-22 11:47:41,431 - ResultAnalyzer - INFO - Loading data from results/dqn_training_data_default.json
+2025-04-22 11:47:41,433 - ResultAnalyzer - INFO - Loaded data for default_DQN: 1000 records
+2025-04-22 11:47:41,434 - ResultAnalyzer - INFO - Loading data from results/training_data_default.json
+2025-04-22 11:47:41,436 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1000 records
+2025-04-22 11:47:41,436 - ResultAnalyzer - INFO - Loading data from results/ddpg_training_data_default.json
+2025-04-22 11:47:41,439 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1000 records
+2025-04-22 11:47:41,908 - ResultAnalyzer - INFO - Saved method comparison chart to results/analysis/method_comparison.png
+2025-04-22 11:47:41,916 - ResultAnalyzer - INFO - Saved processed results to results/analysis/simulation_results.json
+2025-04-22 11:47:41,916 - ResultAnalyzer - INFO - Found 4 JSON files
+2025-04-22 11:47:41,916 - ResultAnalyzer - INFO - Loading data from results/ppo_training_data_default.json
+2025-04-22 11:47:41,917 - ResultAnalyzer - INFO - Loaded data for default_PPO: 1000 records
+2025-04-22 11:47:41,917 - ResultAnalyzer - INFO - Loading data from results/dqn_training_data_default.json
+2025-04-22 11:47:41,919 - ResultAnalyzer - INFO - Loaded data for default_DQN: 1000 records
+2025-04-22 11:47:41,919 - ResultAnalyzer - INFO - Loading data from results/training_data_default.json
+2025-04-22 11:47:41,921 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1000 records
+2025-04-22 11:47:41,921 - ResultAnalyzer - INFO - Loading data from results/ddpg_training_data_default.json
+2025-04-22 11:47:41,924 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1000 records
+2025-04-22 11:47:41,924 - ResultAnalyzer - INFO - Generated performance report at results/analysis/performance_report.md
+2025-04-22 11:47:41,925 - ResultAnalyzer - INFO - Analysis complete
+2025-04-22 12:04:23,262 - ResultAnalyzer - INFO - Initialized ResultAnalyzer with results_dir=results, output_dir=results/analysis
+2025-04-22 12:04:23,262 - ResultAnalyzer - INFO - Found 4 JSON files
+2025-04-22 12:04:23,262 - ResultAnalyzer - INFO - Loading data from results/ppo_training_data_default.json
+2025-04-22 12:04:23,265 - ResultAnalyzer - INFO - Loaded data for default_PPO: 1000 records
+2025-04-22 12:04:23,265 - ResultAnalyzer - INFO - Loading data from results/dqn_training_data_default.json
+2025-04-22 12:04:23,267 - ResultAnalyzer - INFO - Loaded data for default_DQN: 1000 records
+2025-04-22 12:04:23,267 - ResultAnalyzer - INFO - Loading data from results/training_data_default.json
+2025-04-22 12:04:23,270 - ResultAnalyzer - INFO - Loaded data for default_Prioritize_DDPG: 1000 records
+2025-04-22 12:04:23,270 - ResultAnalyzer - INFO - Loading data from results/ddpg_training_data_default.json
+2025-04-22 12:04:23,273 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1000 records
+2025-04-22 12:04:23,795 - ResultAnalyzer - INFO - Saved method comparison chart to results/analysis/method_comparison.png
+2025-04-22 12:04:23,804 - ResultAnalyzer - INFO - Saved processed results to results/analysis/simulation_results.json
+2025-04-22 12:04:23,804 - ResultAnalyzer - INFO - Found 4 JSON files
+2025-04-22 12:04:23,804 - ResultAnalyzer - INFO - Loading data from results/ppo_training_data_default.json
+2025-04-22 12:04:23,805 - ResultAnalyzer - INFO - Loaded data for default_PPO: 1000 records
+2025-04-22 12:04:23,805 - ResultAnalyzer - INFO - Loading data from results/dqn_training_data_default.json
+2025-04-22 12:04:23,807 - ResultAnalyzer - INFO - Loaded data for default_DQN: 1000 records
+2025-04-22 12:04:23,807 - ResultAnalyzer - INFO - Loading data from results/training_data_default.json
+2025-04-22 12:04:23,809 - ResultAnalyzer - INFO - Loaded data for default_Prioritize_DDPG: 1000 records
+2025-04-22 12:04:23,809 - ResultAnalyzer - INFO - Loading data from results/ddpg_training_data_default.json
+2025-04-22 12:04:23,812 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1000 records
+2025-04-22 12:04:23,813 - ResultAnalyzer - INFO - Generated performance report at results/analysis/performance_report.md
+2025-04-22 12:04:23,813 - ResultAnalyzer - INFO - Analysis complete
+2025-04-22 12:19:38,481 - ResultAnalyzer - INFO - Initialized ResultAnalyzer with results_dir=results, output_dir=results/analysis
+2025-04-22 12:19:38,481 - ResultAnalyzer - INFO - Found 4 JSON files
+2025-04-22 12:19:38,481 - ResultAnalyzer - INFO - Loading data from results/ppo_training_data_default.json
+2025-04-22 12:19:38,483 - ResultAnalyzer - INFO - Loaded data for default_PPO: 1000 records
+2025-04-22 12:19:38,483 - ResultAnalyzer - INFO - Loading data from results/dqn_training_data_default.json
+2025-04-22 12:19:38,486 - ResultAnalyzer - INFO - Loaded data for default_DQN: 1000 records
+2025-04-22 12:19:38,486 - ResultAnalyzer - INFO - Loading data from results/training_data_default.json
+2025-04-22 12:19:38,488 - ResultAnalyzer - INFO - Loaded data for default_Prioritize_DDPG: 1000 records
+2025-04-22 12:19:38,488 - ResultAnalyzer - INFO - Loading data from results/ddpg_training_data_default.json
+2025-04-22 12:19:38,491 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1000 records
+2025-04-22 12:19:39,016 - ResultAnalyzer - INFO - Saved method comparison chart to results/analysis/method_comparison.png
+2025-04-22 12:19:39,026 - ResultAnalyzer - INFO - Saved processed results to results/analysis/simulation_results.json
+2025-04-22 12:19:39,026 - ResultAnalyzer - INFO - Found 4 JSON files
+2025-04-22 12:19:39,026 - ResultAnalyzer - INFO - Loading data from results/ppo_training_data_default.json
+2025-04-22 12:19:39,027 - ResultAnalyzer - INFO - Loaded data for default_PPO: 1000 records
+2025-04-22 12:19:39,027 - ResultAnalyzer - INFO - Loading data from results/dqn_training_data_default.json
+2025-04-22 12:19:39,029 - ResultAnalyzer - INFO - Loaded data for default_DQN: 1000 records
+2025-04-22 12:19:39,029 - ResultAnalyzer - INFO - Loading data from results/training_data_default.json
+2025-04-22 12:19:39,031 - ResultAnalyzer - INFO - Loaded data for default_Prioritize_DDPG: 1000 records
+2025-04-22 12:19:39,031 - ResultAnalyzer - INFO - Loading data from results/ddpg_training_data_default.json
+2025-04-22 12:19:39,034 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1000 records
+2025-04-22 12:19:39,035 - ResultAnalyzer - INFO - Generated performance report at results/analysis/performance_report.md
+2025-04-22 12:19:39,035 - ResultAnalyzer - INFO - Analysis complete
+2025-04-23 12:57:23,939 - ResultAnalyzer - INFO - Initialized ResultAnalyzer with results_dir=results, output_dir=results/analysis
+2025-04-23 12:57:23,940 - ResultAnalyzer - INFO - Found 5 JSON files
+2025-04-23 12:57:23,940 - ResultAnalyzer - INFO - Loading data from results/ppo_training_data_default.json
+2025-04-23 12:57:23,943 - ResultAnalyzer - INFO - Loaded data for default_PPO: 1500 records
+2025-04-23 12:57:23,943 - ResultAnalyzer - INFO - Loading data from results/dqn_training_data_default.json
+2025-04-23 12:57:23,947 - ResultAnalyzer - INFO - Loaded data for default_DQN: 1500 records
+2025-04-23 12:57:23,947 - ResultAnalyzer - INFO - Loading data from results/training_data_default.json
+2025-04-23 12:57:23,950 - ResultAnalyzer - INFO - Loaded data for default_Prioritize_DDPG: 1000 records
+2025-04-23 12:57:23,950 - ResultAnalyzer - INFO - Loading data from results/ddpg_training_data_default.json
+2025-04-23 12:57:23,954 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1500 records
+2025-04-23 12:57:23,954 - ResultAnalyzer - INFO - Loading data from results/priddpg_training_data_default.json
+2025-04-23 12:57:23,957 - ResultAnalyzer - INFO - Loaded data for default_PRIDDPG: 1500 records
+2025-04-23 12:57:24,506 - ResultAnalyzer - INFO - Saved method comparison chart to results/analysis/method_comparison.png
+2025-04-23 12:57:24,522 - ResultAnalyzer - INFO - Saved processed results to results/analysis/simulation_results.json
+2025-04-23 12:57:24,523 - ResultAnalyzer - INFO - Found 5 JSON files
+2025-04-23 12:57:24,523 - ResultAnalyzer - INFO - Loading data from results/ppo_training_data_default.json
+2025-04-23 12:57:24,524 - ResultAnalyzer - INFO - Loaded data for default_PPO: 1500 records
+2025-04-23 12:57:24,524 - ResultAnalyzer - INFO - Loading data from results/dqn_training_data_default.json
+2025-04-23 12:57:24,527 - ResultAnalyzer - INFO - Loaded data for default_DQN: 1500 records
+2025-04-23 12:57:24,527 - ResultAnalyzer - INFO - Loading data from results/training_data_default.json
+2025-04-23 12:57:24,529 - ResultAnalyzer - INFO - Loaded data for default_Prioritize_DDPG: 1000 records
+2025-04-23 12:57:24,529 - ResultAnalyzer - INFO - Loading data from results/ddpg_training_data_default.json
+2025-04-23 12:57:24,532 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1500 records
+2025-04-23 12:57:24,532 - ResultAnalyzer - INFO - Loading data from results/priddpg_training_data_default.json
+2025-04-23 12:57:24,535 - ResultAnalyzer - INFO - Loaded data for default_PRIDDPG: 1500 records
+2025-04-23 12:57:24,536 - ResultAnalyzer - INFO - Generated performance report at results/analysis/performance_report.md
+2025-04-23 12:57:24,536 - ResultAnalyzer - INFO - Analysis complete
+2025-04-23 12:59:32,853 - ResultAnalyzer - INFO - Initialized ResultAnalyzer with results_dir=results, output_dir=results/analysis
+2025-04-23 12:59:32,853 - ResultAnalyzer - INFO - Found 5 JSON files
+2025-04-23 12:59:32,853 - ResultAnalyzer - INFO - Loading data from results/ppo_training_data_default.json
+2025-04-23 12:59:32,856 - ResultAnalyzer - INFO - Loaded data for default_PPO: 1500 records
+2025-04-23 12:59:32,856 - ResultAnalyzer - INFO - Loading data from results/dqn_training_data_default.json
+2025-04-23 12:59:32,859 - ResultAnalyzer - INFO - Loaded data for default_DQN: 1500 records
+2025-04-23 12:59:32,859 - ResultAnalyzer - INFO - Loading data from results/training_data_default.json
+2025-04-23 12:59:32,862 - ResultAnalyzer - INFO - Loaded data for default_Prioritize_DDPG: 1000 records
+2025-04-23 12:59:32,862 - ResultAnalyzer - INFO - Loading data from results/ddpg_training_data_default.json
+2025-04-23 12:59:32,866 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1500 records
+2025-04-23 12:59:32,866 - ResultAnalyzer - INFO - Loading data from results/priddpg_training_data_default.json
+2025-04-23 12:59:32,870 - ResultAnalyzer - INFO - Loaded data for default_PRIDDPG: 1500 records
+2025-04-23 12:59:33,439 - ResultAnalyzer - INFO - Saved method comparison chart to results/analysis/method_comparison.png
+2025-04-23 12:59:33,456 - ResultAnalyzer - INFO - Saved processed results to results/analysis/simulation_results.json
+2025-04-23 12:59:33,456 - ResultAnalyzer - INFO - Found 5 JSON files
+2025-04-23 12:59:33,456 - ResultAnalyzer - INFO - Loading data from results/ppo_training_data_default.json
+2025-04-23 12:59:33,458 - ResultAnalyzer - INFO - Loaded data for default_PPO: 1500 records
+2025-04-23 12:59:33,458 - ResultAnalyzer - INFO - Loading data from results/dqn_training_data_default.json
+2025-04-23 12:59:33,461 - ResultAnalyzer - INFO - Loaded data for default_DQN: 1500 records
+2025-04-23 12:59:33,461 - ResultAnalyzer - INFO - Loading data from results/training_data_default.json
+2025-04-23 12:59:33,462 - ResultAnalyzer - INFO - Loaded data for default_Prioritize_DDPG: 1000 records
+2025-04-23 12:59:33,462 - ResultAnalyzer - INFO - Loading data from results/ddpg_training_data_default.json
+2025-04-23 12:59:33,466 - ResultAnalyzer - INFO - Loaded data for default_DDPG: 1500 records
+2025-04-23 12:59:33,466 - ResultAnalyzer - INFO - Loading data from results/priddpg_training_data_default.json
+2025-04-23 12:59:33,468 - ResultAnalyzer - INFO - Loaded data for default_PRIDDPG: 1500 records
+2025-04-23 12:59:33,469 - ResultAnalyzer - INFO - Generated performance report at results/analysis/performance_report.md
+2025-04-23 12:59:33,469 - ResultAnalyzer - INFO - Analysis complete

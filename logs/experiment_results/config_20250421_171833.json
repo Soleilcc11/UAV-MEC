@@ -1,0 +1,53 @@
+{
+    "algorithms": [
+        {
+            "name": "ddpg",
+            "params": {
+                "lr": 0.001,
+                "batch_size": 64
+            }
+        },
+        {
+            "name": "prioritized_ddpg",
+            "params": {
+                "lr": 0.001,
+                "batch_size": 64
+            }
+        },
+        {
+            "name": "ppo",
+            "params": {
+                "lr": 0.0003,
+                "batch_size": 64
+            }
+        },
+        {
+            "name": "dqn",
+            "params": {
+                "lr": 0.001,
+                "batch_size": 64
+            }
+        }
+    ],
+    "scenarios": [
+        {
+            "name": "urban",
+            "params": {
+                "uav_count": 5,
+                "user_density": "high"
+            }
+        },
+        {
+            "name": "rural",
+            "params": {
+                "uav_count": 3,
+                "user_density": "low"
+            }
+        }
+    ],
+    "experiment": {
+        "max_tasks": 5000,
+        "sim_time": 300,
+        "id": "20250421_171833"
+    }
+}

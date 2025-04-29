@@ -1,0 +1,8 @@
+edu/boun/edgecloudsim/edge_client/mobile_processing_unit/MobileVM.class
+edu/boun/edgecloudsim/core/SimSettings.class
+edu/boun/edgecloudsim/applications/sample_app5/VehicularMobileServerManager.class
+edu/boun/edgecloudsim/core/SimSettings$VM_TYPES.class
+edu/boun/edgecloudsim/edge_client/mobile_processing_unit/MobileServerManager.class
+edu/boun/edgecloudsim/edge_client/mobile_processing_unit/MobileHost.class
+edu/boun/edgecloudsim/core/SimSettings$DEVICE_TYPE.class
+edu/boun/edgecloudsim/core/SimSettings$NETWORK_DELAY_TYPES.class

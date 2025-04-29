@@ -1,0 +1,21 @@
+{
+    "algorithm": {
+        "name": "dqn",
+        "params": {
+            "lr": 0.001,
+            "batch_size": 64
+        }
+    },
+    "scenario": {
+        "name": "rural",
+        "params": {
+            "uav_count": 3,
+            "user_density": "low"
+        }
+    },
+    "experiment": {
+        "max_tasks": 5000,
+        "sim_time": 300,
+        "id": "20250421_171833"
+    }
+}

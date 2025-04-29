@@ -35,12 +35,23 @@ public class TaskOffloadingEngine {
      */
     public TaskOffloadingEngine(SimManager simManager) {
         this.simManager = simManager;
+        // 初始化集合和计数器
+        this.activeTasks = new HashMap<>();
+        this.totalTaskCount = new AtomicInteger(0);
+        this.completedTaskCount = new AtomicInteger(0);
+        this.rejectedTaskCount = new AtomicInteger(0);
+        this.totalLatency = 0.0;
+        this.useDQN = false;
     }
     
     /**
      * 初始化引擎
      */
     public void initialize() {
+        // 初始化状态动作管理器和奖励计算器
+        this.stateActionManager = new StateActionManager(simManager);
+        this.rewardCalculator = new RewardCalculator();
+        
         // 连接到Python RL服务器
         try {
             this.pythonInterface = new EnhancedPythonInterface("localhost", 12345);
@@ -48,10 +59,12 @@ public class TaskOffloadingEngine {
                 SimLogger.printLine("成功连接到RL服务器");
             } else {
                 SimLogger.printLine("无法连接到RL服务器，将使用默认策略");
+                this.pythonInterface = null;
             }
         } catch (Exception e) {
             SimLogger.printLine("初始化RL接口时出错: " + e.getMessage());
             SimLogger.printLine("将使用默认策略");
+            this.pythonInterface = null;
         }
     }
     
@@ -61,7 +74,17 @@ public class TaskOffloadingEngine {
      * @return 卸载决策（目标UAV的ID）
      */
     public int getOffloadingDecision(UAV.Task task) {
+        // 确保已初始化
+        if (totalTaskCount == null) {
+            totalTaskCount = new AtomicInteger(0);
+        }
         totalTaskCount.incrementAndGet();
+        
+        // 确保状态动作管理器已初始化
+        if (stateActionManager == null) {
+            SimLogger.printLine("警告: StateActionManager未初始化，使用默认决策");
+            return getDefaultDecision();
+        }
         
         // 生成当前状态
         double[] state = stateActionManager.generateState();
@@ -97,7 +120,12 @@ public class TaskOffloadingEngine {
                 // 等待回调完成（在实际系统中可能需要异步处理）
                 int waitCount = 0;
                 while (!completed[0] && waitCount < 100) {
-                    Thread.sleep(10);
+                    try {
+                        Thread.sleep(10);
+                    } catch (InterruptedException e) {
+                        SimLogger.printLine("等待RL决策时被中断");
+                        break;
+                    }
                     waitCount++;
                 }
                 
@@ -123,7 +151,16 @@ public class TaskOffloadingEngine {
      */
     private int getDefaultDecision() {
         UAVManager uavManager = simManager.getUAVManager();
+        if (uavManager == null) {
+            SimLogger.printLine("警告: UAVManager为空，返回本地执行");
+            return LOCAL_EXECUTION;
+        }
+        
         List<UAV> uavList = uavManager.getUAVs();
+        if (uavList == null || uavList.isEmpty()) {
+            SimLogger.printLine("警告: UAV列表为空，返回本地执行");
+            return LOCAL_EXECUTION;
+        }
         
         // 简单的轮询策略
         int minQueueLength = Integer.MAX_VALUE;
@@ -146,7 +183,21 @@ public class TaskOffloadingEngine {
      * @return 是否成功提交
      */
     public boolean submitTask(UAV.Task task, int uavId) {
+        // 确保已初始化
+        if (activeTasks == null) {
+            activeTasks = new HashMap<>();
+        }
+        if (rejectedTaskCount == null) {
+            rejectedTaskCount = new AtomicInteger(0);
+        }
+        
         UAVManager uavManager = simManager.getUAVManager();
+        if (uavManager == null) {
+            SimLogger.printLine("警告: UAVManager为空，任务提交失败");
+            rejectedTaskCount.incrementAndGet();
+            return false;
+        }
+        
         boolean success = uavManager.assignTask(uavId, task);
         
         if (success) {
@@ -163,6 +214,14 @@ public class TaskOffloadingEngine {
      * @param task 完成的任务
      */
     public void taskCompleted(UAV.Task task) {
+        // 确保已初始化
+        if (activeTasks == null) {
+            activeTasks = new HashMap<>();
+        }
+        if (completedTaskCount == null) {
+            completedTaskCount = new AtomicInteger(0);
+        }
+        
         // 从活动任务中移除
         activeTasks.remove(task.getId());
         completedTaskCount.incrementAndGet();
@@ -175,7 +234,8 @@ public class TaskOffloadingEngine {
         SimLogger.printLine("任务 " + task.getId() + " 完成，延迟: " + latency + "ms");
         
         // 如果有RL模型，进行训练
-        if (pythonInterface != null && pythonInterface.isConnected()) {
+        if (pythonInterface != null && pythonInterface.isConnected() && 
+            stateActionManager != null && rewardCalculator != null) {
             trainRLModel(task, latency);
         }
     }
@@ -232,7 +292,7 @@ public class TaskOffloadingEngine {
      * @return 总任务数
      */
     public int getTotalTaskCount() {
-        return totalTaskCount.get();
+        return totalTaskCount != null ? totalTaskCount.get() : 0;
     }
     
     /**
@@ -240,7 +300,7 @@ public class TaskOffloadingEngine {
      * @return 完成的任务数
      */
     public int getCompletedTaskCount() {
-        return completedTaskCount.get();
+        return completedTaskCount != null ? completedTaskCount.get() : 0;
     }
     
     /**
@@ -248,7 +308,7 @@ public class TaskOffloadingEngine {
      * @return 拒绝的任务数
      */
     public int getRejectedTaskCount() {
-        return rejectedTaskCount.get();
+        return rejectedTaskCount != null ? rejectedTaskCount.get() : 0;
     }
     
     /**
@@ -262,7 +322,68 @@ public class TaskOffloadingEngine {
      * 关闭引擎
      */
     public void close() {
-        // 关闭逻辑
+        // 关闭Python接口
+        if (pythonInterface != null) {
+            try {
+                pythonInterface.close();
+            } catch (Exception e) {
+                SimLogger.printLine("关闭Python接口时出错: " + e.getMessage());
+            }
+        }
     }
     
+    /**
+     * 状态动作管理器内部类
+     */
+    public class StateActionManager {
+        private SimManager simManager;
+        private double[] lastState;
+        private double[] lastAction;
+        
+        public StateActionManager(SimManager simManager) {
+            this.simManager = simManager;
+            this.lastState = null;
+            this.lastAction = null;
+        }
+        
+        public double[] generateState() {
+            // 简化版：生成一个基本状态向量
+            // 实际实现中应该包含更多系统状态信息
+            return new double[]{simManager.getSimulationTime(), getCompletedTaskCount()};
+        }
+        
+        public List<Map<String, Object>> parseOffloadingDecision(double[] action) {
+            // 简化版：将动作向量解析为决策列表
+            List<Map<String, Object>> decisions = new ArrayList<>();
+            Map<String, Object> decision = new HashMap<>();
+            
+            // 简单地将第一个值作为UAV ID
+            decision.put("uavId", (int)action[0]);
+            decisions.add(decision);
+            
+            // 保存最后的动作
+            this.lastAction = action.clone();
+            
+            return decisions;
+        }
+        
+        public double[] getLastState() {
+            return lastState;
+        }
+        
+        public double[] getLastAction() {
+            return lastAction;
+        }
+    }
+    
+    /**
+     * 奖励计算器内部类
+     */
+    public class RewardCalculator {
+        public double calculateReward(long latency, long totalMI) {
+            // 简化版：基于延迟和计算量的反比例奖励
+            // 延迟越低，奖励越高
+            return 1000.0 / (1.0 + latency);
+        }
+    }
 }

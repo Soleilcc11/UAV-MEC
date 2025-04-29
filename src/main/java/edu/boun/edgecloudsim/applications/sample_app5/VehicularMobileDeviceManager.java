@@ -13,7 +13,7 @@
 package edu.boun.edgecloudsim.applications.sample_app5;
 
 import java.util.List;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import org.cloudbus.cloudsim.Host;
 import org.cloudbus.cloudsim.UtilizationModel;
 import org.cloudbus.cloudsim.UtilizationModelFull;

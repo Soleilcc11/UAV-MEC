@@ -1,13 +1,4 @@
-/*
- * Title:        EdgeCloudSim - Main Application
- * 
- * Description:  Main application for Simple App
- *               
- * Licence:      GPL - http://www.gnu.org/copyleft/gpl.html
- * Copyright (c) 2017, Bogazici University, Istanbul, Turkey
- */
-
-package edu.boun.edgecloudsim.applications.sample_app1;
+package edu.boun.edgecloudsim.applications.sample_app1; // 路径根据实际情况修改
 
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -24,108 +15,110 @@ import edu.boun.edgecloudsim.utils.SimLogger;
 import edu.boun.edgecloudsim.utils.SimUtils;
 
 public class MainApp {
-	
-	/**
-	 * Creates main() to run this example
-	 */
-	public static void main(String[] args) {
-		//disable console output of cloudsim library
-		Log.disable();
-		
-		//enable console output and file output of this application
-		SimLogger.enablePrintLog();
-		
-		int iterationNumber = 1;
-		String configFile = "";
-		String outputFolder = "";
-		String edgeDevicesFile = "";
-		String applicationsFile = "";
-		if (args.length == 5){
-			configFile = args[0];
-			edgeDevicesFile = args[1];
-			applicationsFile = args[2];
-			outputFolder = args[3];
-			iterationNumber = Integer.parseInt(args[4]);
-		}
-		else{
-			SimLogger.printLine("Simulation setting file, output folder and iteration number are not provided! Using default ones...");
-			configFile = "scripts/sample_app1/config/default_config.properties";
-			applicationsFile = "scripts/sample_app1/config/applications.xml";
-			edgeDevicesFile = "scripts/sample_app1/config/edge_devices.xml";
-			outputFolder = "sim_results/ite" + iterationNumber;
-		}
+    
+    /**
+     * 创建场景工厂 - 修改为使用适当的UA VMECScenarioFactory
+     */
+    public static ScenarioFactory createScenarioFactory(int numOfMobileDevice, String simScenario, String orchestratorPolicy) {
+        return new edu.boun.edgecloudsim.uav.UAVMECScenarioFactory(numOfMobileDevice, simScenario, orchestratorPolicy);
+    }
 
-		//load settings from configuration file
-		SimSettings SS = SimSettings.getInstance();
-		if(SS.initialize(configFile, edgeDevicesFile, applicationsFile) == false){
-			SimLogger.printLine("cannot initialize simulation settings!");
-			System.exit(0);
-		}
-		
-		if(SS.getFileLoggingEnabled()){
-			SimLogger.enableFileLog();
-			SimUtils.cleanOutputFolder(outputFolder);
-		}
-		
-		DateFormat df = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss");
-		Date SimulationStartDate = Calendar.getInstance().getTime();
-		String now = df.format(SimulationStartDate);
-		SimLogger.printLine("Simulation started at " + now);
-		SimLogger.printLine("----------------------------------------------------------------------");
-
-		for(int j=SS.getMinNumOfMobileDev(); j<=SS.getMaxNumOfMobileDev(); j+=SS.getMobileDevCounterSize())
-		{
-			for(int k=0; k<SS.getSimulationScenarios().length; k++)
-			{
-				for(int i=0; i<SS.getOrchestratorPolicies().length; i++)
-				{
-					String simScenario = SS.getSimulationScenarios()[k];
-					String orchestratorPolicy = SS.getOrchestratorPolicies()[i];
-					Date ScenarioStartDate = Calendar.getInstance().getTime();
-					now = df.format(ScenarioStartDate);
-					
-					SimLogger.printLine("Scenario started at " + now);
-					SimLogger.printLine("Scenario: " + simScenario + " - Policy: " + orchestratorPolicy + " - #iteration: " + iterationNumber);
-					SimLogger.printLine("Duration: " + SS.getSimulationTime()/3600 + " hour(s) - Poisson: " + SS.getTaskLookUpTable()[0][2] + " - #devices: " + j);
-					SimLogger.getInstance().simStarted(outputFolder,"SIMRESULT_" + simScenario + "_"  + orchestratorPolicy + "_" + j + "DEVICES");
-					
-					try
-					{
-						// First step: Initialize the CloudSim package. It should be called
-						// before creating any entities.
-						int num_user = 2;   // number of grid users
-						Calendar calendar = Calendar.getInstance();
-						boolean trace_flag = false;  // mean trace events
-				
-						// Initialize the CloudSim library
-						CloudSim.init(num_user, calendar, trace_flag, 0.01);
-						
-						// Generate EdgeCloudsim Scenario Factory
-						ScenarioFactory sampleFactory = new SampleScenarioFactory(j,SS.getSimulationTime(), orchestratorPolicy, simScenario);
-						
-						// Generate EdgeCloudSim Simulation Manager
-						SimManager manager = new SimManager(sampleFactory, j, simScenario, orchestratorPolicy);
-						
-						// Start simulation
-						manager.startSimulation();
-					}
-					catch (Exception e)
-					{
-						SimLogger.printLine("The simulation has been terminated due to an unexpected error");
-						e.printStackTrace();
-						System.exit(0);
-					}
-					
-					Date ScenarioEndDate = Calendar.getInstance().getTime();
-					now = df.format(ScenarioEndDate);
-					SimLogger.printLine("Scenario finished at " + now +  ". It took " + SimUtils.getTimeDifference(ScenarioStartDate,ScenarioEndDate));
-					SimLogger.printLine("----------------------------------------------------------------------");
-				}//End of orchestrators loop
-			}//End of scenarios loop
-		}//End of mobile devices loop
-
-		Date SimulationEndDate = Calendar.getInstance().getTime();
-		now = df.format(SimulationEndDate);
-		SimLogger.printLine("Simulation finished at " + now +  ". It took " + SimUtils.getTimeDifference(SimulationStartDate,SimulationEndDate));
-	}
+    /**
+     * 主方法入口点
+     */
+    public static void main(String[] args) {
+        // 解析命令行参数
+        SimSettings.getInstance().setSimulationParameters();
+        
+        // 禁止输出时间戳
+        boolean experimentalTimeStamp = false;
+        
+        // 用于保存配置和结果的目录
+        String configFile = "";
+        String outputFolder = "";
+        String edgeDevicesFile = "";
+        String applicationsFile = "";
+        
+        // 默认参数
+        int numOfMobileDevice = 100;
+        String orchestratorPolicy = "RANDOM";
+        String simScenario = "SINGLE_TIER";
+        
+        // 解析命令行参数，获取配置
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].equals("-c")) {
+                configFile = args[++i];
+            } else if (args[i].equals("-o")) {
+                outputFolder = args[++i];
+            } else if (args[i].equals("-a")) {
+                applicationsFile = args[++i];
+            } else if (args[i].equals("-d")) {
+                edgeDevicesFile = args[++i];
+            } else if (args[i].equals("-n")) {
+                numOfMobileDevice = Integer.parseInt(args[++i]);
+            } else if (args[i].equals("-s")) {
+                simScenario = args[++i];
+            } else if (args[i].equals("-p")) {
+                orchestratorPolicy = args[++i];
+            }
+        }
+        
+        // 加载配置文件
+        if (configFile.isEmpty()) {
+            System.out.println("缺少配置文件");
+            System.exit(0);
+        }
+        if (edgeDevicesFile.isEmpty()) {
+            System.out.println("缺少边缘设备文件");
+            System.exit(0);
+        }
+        if (applicationsFile.isEmpty()) {
+            System.out.println("缺少应用程序文件");
+            System.exit(0);
+        }
+        
+        // 加载边缘设备和应用程序配置
+        SimSettings.getInstance().initialize(configFile, edgeDevicesFile, applicationsFile);
+        
+        // 记录配置参数
+        System.out.println("模拟开始时间: " + SimSettings.getInstance().getSimulationTime());
+        System.out.println("移动设备数量: " + numOfMobileDevice);
+        System.out.println("模拟场景: " + simScenario);
+        System.out.println("编排策略: " + orchestratorPolicy);
+        
+        // 准备输出文件夹
+        if (outputFolder.isEmpty())
+            outputFolder = SimUtils.getOutputFolder();
+        SimLogger.getInstance().setOutputFolder(outputFolder);
+        
+        // 创建日志文件
+        DateFormat df = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss");
+        Date simulationStartDate = Calendar.getInstance().getTime();
+        String simulationStartTime = df.format(simulationStartDate);
+        
+        SimLogger.getInstance().simStarted(outputFolder, orchestratorPolicy, simScenario, numOfMobileDevice);
+        SimLogger.getInstance().printLine("Simulation started at " + simulationStartTime);
+        SimLogger.getInstance().printLine("----------------------------------------------------------------------");
+        
+        // 初始化 CloudSim 库
+        int num_user = 2;
+        Calendar calendar = Calendar.getInstance();
+        boolean trace_flag = false;
+        CloudSim.init(num_user, calendar, trace_flag, 0.01);
+        
+        // 创建并初始化场景工厂
+        ScenarioFactory factory = createScenarioFactory(numOfMobileDevice, simScenario, orchestratorPolicy);
+        
+        // 创建SimManager实例并初始化
+        SimManager manager = SimManager.getInstance();
+        manager.initialize(factory, numOfMobileDevice, simScenario, orchestratorPolicy);
+        
+        // 开始模拟
+        manager.startSimulation();
+        
+        // 处理结果
+        Date simulationEndDate = Calendar.getInstance().getTime();
+        String simulationEndTime = df.format(simulationEndDate);
+        SimLogger.getInstance().simStopped(simulationEndTime);
+    }
 }

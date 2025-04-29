@@ -11,7 +11,7 @@
 package edu.boun.edgecloudsim.applications.sample_app4;
 
 import org.cloudbus.cloudsim.core.CloudSim;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.edge_client.Task;

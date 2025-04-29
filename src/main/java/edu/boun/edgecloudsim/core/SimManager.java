@@ -2,6 +2,7 @@ package edu.boun.edgecloudsim.core;
 
 import org.cloudbus.cloudsim.core.CloudSim;
 
+
 import edu.boun.edgecloudsim.cloud_server.CloudServerManager;
 import edu.boun.edgecloudsim.edge_client.MobileDeviceManager;
 import edu.boun.edgecloudsim.edge_client.mobile_processing_unit.MobileServerManager;
@@ -37,6 +38,49 @@ public class SimManager {
     private int numOfMobileDevice;
     private String simScenario;
     private String orchestratorPolicy;
+    
+    /**
+     * 默认构造函数 - 私有化以实现单例模式
+     */
+    private SimManager() {
+        // 默认构造函数，不执行任何初始化
+    }
+    
+    /**
+     * 新增构造函数 - 支持带参数的初始化
+     * 修复构造函数不匹配的问题
+     */
+    public SimManager(ScenarioFactory _scenarioFactory, int _numOfMobileDevice, 
+                     String _simScenario, String _orchestratorPolicy) {
+        scenarioFactory = _scenarioFactory;
+        numOfMobileDevice = _numOfMobileDevice;
+        simScenario = _simScenario;
+        orchestratorPolicy = _orchestratorPolicy;
+        
+        simSettings = SimSettings.getInstance();
+        
+        // 初始化核心组件
+        try {
+            mobilityModel = scenarioFactory.getMobilityModel();
+            networkModel = scenarioFactory.getNetworkModel();
+            orchestrator = scenarioFactory.getEdgeOrchestrator();
+            edgeServerManager = scenarioFactory.getEdgeServerManager();
+            cloudServerManager = scenarioFactory.getCloudServerManager();
+            mobileServerManager = scenarioFactory.getMobileServerManager();
+            mobileDeviceManager = scenarioFactory.getMobileDeviceManager();
+            
+            // 如果ScenarioFactory是UAVMECScenarioFactory，获取UAVManager
+            if (scenarioFactory instanceof edu.boun.edgecloudsim.uav.UAVMECScenarioFactory) {
+                uavManager = ((edu.boun.edgecloudsim.uav.UAVMECScenarioFactory) scenarioFactory).getUAVManager();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.exit(1);
+        }
+        
+        // 更新单例实例
+        instance = this;
+    }
     
     // 获取实例（单例模式）
     public static SimManager getInstance(){
@@ -75,6 +119,11 @@ public class SimManager {
             cloudServerManager = scenarioFactory.getCloudServerManager();
             mobileServerManager = scenarioFactory.getMobileServerManager();
             mobileDeviceManager = scenarioFactory.getMobileDeviceManager();
+            
+            // 如果ScenarioFactory是UAVMECScenarioFactory，获取UAVManager
+            if (scenarioFactory instanceof edu.boun.edgecloudsim.uav.UAVMECScenarioFactory) {
+                uavManager = ((edu.boun.edgecloudsim.uav.UAVMECScenarioFactory) scenarioFactory).getUAVManager();
+            }
         } catch (Exception e) {
             e.printStackTrace();
             System.exit(1);

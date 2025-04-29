@@ -8,6 +8,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.File;
 
+
 import edu.boun.edgecloudsim.uav.UAVMECScenarioFactory;
 
 /**
@@ -342,7 +343,7 @@ public class SimSettings {
     public double getUAVAdditionalPathLoss() {
         return Double.parseDouble(configFile.getProperty("uav_additional_path_loss", "0.0"));
     }
-    
+
     public double getManBandwidth() {
         return Double.parseDouble(configFile.getProperty("man_bandwidth", "100"));
     }

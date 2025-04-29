@@ -13,7 +13,7 @@
 package edu.boun.edgecloudsim.applications.sample_app4;
 
 import java.util.List;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import org.antlr.runtime.RecognitionException;
 import org.cloudbus.cloudsim.Host;
 import org.cloudbus.cloudsim.UtilizationModelFull;

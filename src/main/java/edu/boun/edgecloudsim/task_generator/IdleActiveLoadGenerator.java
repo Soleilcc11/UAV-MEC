@@ -12,7 +12,7 @@
  */
 
 package edu.boun.edgecloudsim.task_generator;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import java.util.ArrayList;
 
 import org.apache.commons.math3.distribution.ExponentialDistribution;

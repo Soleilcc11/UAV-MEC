@@ -15,7 +15,7 @@
  */
 
 package edu.boun.edgecloudsim.applications.sample_app5;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import org.cloudbus.cloudsim.UtilizationModel;
 
 import edu.boun.edgecloudsim.core.SimSettings;

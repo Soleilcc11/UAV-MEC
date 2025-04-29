@@ -3,7 +3,7 @@ package edu.boun.edgecloudsim.applications.sample_app5;
 import java.util.ArrayList;
 
 import org.apache.commons.math3.distribution.ExponentialDistribution;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.task_generator.LoadGeneratorModel;
 import edu.boun.edgecloudsim.utils.TaskProperty;

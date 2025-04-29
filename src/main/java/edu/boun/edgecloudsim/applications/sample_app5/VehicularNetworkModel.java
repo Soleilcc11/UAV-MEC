@@ -12,7 +12,7 @@
 package edu.boun.edgecloudsim.applications.sample_app5;
 
 import org.cloudbus.cloudsim.core.CloudSim;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.core.SimSettings.NETWORK_DELAY_TYPES;
 import edu.boun.edgecloudsim.edge_client.Task;

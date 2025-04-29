@@ -13,7 +13,7 @@
 package edu.boun.edgecloudsim.edge_orchestrator;
 
 import java.util.List;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import org.cloudbus.cloudsim.Host;
 import org.cloudbus.cloudsim.Vm;
 import org.cloudbus.cloudsim.core.CloudSim;

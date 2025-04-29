@@ -10,8 +10,11 @@ import edu.boun.edgecloudsim.mobility.MobilityModel;
 import edu.boun.edgecloudsim.network.NetworkModel;
 import edu.boun.edgecloudsim.task_generator.LoadGeneratorModel;
 import edu.boun.edgecloudsim.utils.Location;
+import org.cloudbus.cloudsim.core.SimEntity;
 import org.cloudbus.cloudsim.core.SimEvent;
 import org.cloudbus.cloudsim.Vm;
+import org.cloudbus.cloudsim.Host;
+import org.cloudbus.cloudsim.VmAllocationPolicy;
 import java.util.List;
 import java.util.ArrayList;
 import org.cloudbus.cloudsim.UtilizationModel;
@@ -46,10 +49,8 @@ public class UAVMECScenarioFactory implements ScenarioFactory {
     
     @Override
     public EdgeOrchestrator getEdgeOrchestrator() {
-        // 使用 TaskOffloadingOrchestrator
-        // 注意：这里可能需要修改构造函数，取决于TaskOffloadingOrchestrator的实现
-        return new TaskOffloadingOrchestrator(
-            edu.boun.edgecloudsim.core.SimManager.getInstance());
+        // 使用正确的参数创建TaskOffloadingOrchestrator
+        return new TaskOffloadingOrchestrator(orchestratorPolicy, simScenario);
     }
     
     @Override
@@ -94,12 +95,28 @@ public class UAVMECScenarioFactory implements ScenarioFactory {
             }
             
             @Override
-            public List<Vm> createVmList(int hostId) {
-                // 创建并返回VM列表
-                return new ArrayList<Vm>();
+            public void createVmList(int brokerId) {
+                // 实现创建VM列表的逻辑，但不返回任何内容
+                // 符合EdgeServerManager接口定义
             }
             
-            // 添加getVmInstance方法
+            @Override
+            public void startDatacenters() throws Exception {
+                // 实现启动数据中心的逻辑
+            }
+            
+            @Override
+            public void terminateDatacenters() {
+                // 实现终止数据中心的逻辑
+            }
+            
+            @Override
+            public VmAllocationPolicy getVmAllocationPolicy(List<? extends Host> list, int dataCenterIndex) {
+                // 实现VM分配策略
+                return null;
+            }
+            
+            // 额外的辅助方法
             public Vm getVmInstance(int hostId, int vmId) {
                 return null;
             }
@@ -108,7 +125,6 @@ public class UAVMECScenarioFactory implements ScenarioFactory {
     
     @Override
     public CloudServerManager getCloudServerManager() {
-        // 添加缺失的createVmList方法
         return new CloudServerManager() {
             @Override
             public void initialize() {}
@@ -128,12 +144,28 @@ public class UAVMECScenarioFactory implements ScenarioFactory {
             }
             
             @Override
-            public List<Vm> createVmList(int hostId) {
-                // 创建并返回VM列表
-                return new ArrayList<Vm>();
+            public void createVmList(int brokerId) {
+                // 实现创建VM列表的逻辑，但不返回任何内容
+                // 符合CloudServerManager接口定义
             }
             
-            // 添加getVmInstance方法
+            @Override
+            public void startDatacenters() throws Exception {
+                // 实现启动数据中心的逻辑
+            }
+            
+            @Override
+            public void terminateDatacenters() {
+                // 实现终止数据中心的逻辑
+            }
+            
+            @Override
+            public VmAllocationPolicy getVmAllocationPolicy(List<? extends Host> list, int dataCenterIndex) {
+                // 实现VM分配策略
+                return null;
+            }
+            
+            // 额外的辅助方法
             public Vm getVmInstance(int hostId, int vmId) {
                 return null;
             }
@@ -142,7 +174,6 @@ public class UAVMECScenarioFactory implements ScenarioFactory {
     
     @Override
     public MobileServerManager getMobileServerManager() {
-        // 修复空构造函数和添加createVmList方法
         return new MobileServerManager() {
             @Override
             public void initialize() {}
@@ -153,12 +184,28 @@ public class UAVMECScenarioFactory implements ScenarioFactory {
             }
             
             @Override
-            public List<Vm> createVmList(int hostId) {
-                // 创建并返回VM列表
-                return new ArrayList<Vm>();
+            public void createVmList(int brokerId) {
+                // 实现创建VM列表的逻辑，但不返回任何内容
+                // 符合MobileServerManager接口定义
             }
             
-            // 添加getVmInstance方法
+            @Override
+            public void startDatacenters() throws Exception {
+                // 实现启动数据中心的逻辑
+            }
+            
+            @Override
+            public void terminateDatacenters() {
+                // 实现终止数据中心的逻辑
+            }
+            
+            @Override
+            public VmAllocationPolicy getVmAllocationPolicy(List<? extends Host> list, int dataCenterIndex) {
+                // 实现VM分配策略
+                return null;
+            }
+            
+            // 额外的辅助方法
             public Vm getVmInstance(int hostId, int vmId) {
                 return null;
             }

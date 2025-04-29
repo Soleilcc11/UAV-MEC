@@ -34,8 +34,22 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
         }
     }
     
+    /**
+     * 实现EdgeOrchestrator接口的getDeviceToOffload方法
+     */
     @Override
-    public int getDeviceToOffload(int mobileDeviceId) {
+    public int getDeviceToOffload(Task task) {
+        // 从任务中获取移动设备ID
+        int mobileDeviceId = task.getMobileDeviceId();
+        
+        // 调用内部方法处理设备ID
+        return getDeviceToOffload(mobileDeviceId);
+    }
+    
+    /**
+     * 内部方法：根据移动设备ID获取卸载目标设备
+     */
+    private int getDeviceToOffload(int mobileDeviceId) {
         // 根据移动设备ID获取卸载目标设备
         double[] location = getMobileDeviceLocation(mobileDeviceId);
         
@@ -73,9 +87,25 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
 
     @Override
     public Vm getVmToOffload(Task task, int deviceId) {
-        // 根据设备ID选择合适的VM
-        int vmType = SimSettings.VM_TYPES.EDGE_VM.ordinal();
-        return getVmToOffload(deviceId, deviceId, vmType, task.getTaskType());
+        // 根据任务类型和设备ID获取合适的VM
+        int vmType;
+        
+        if (deviceId == SimSettings.CLOUD_DATACENTER_ID) {
+            vmType = SimSettings.VM_TYPES.CLOUD_VM.ordinal();
+        } else if (deviceId == SimSettings.MOBILE_DATACENTER_ID) {
+            vmType = SimSettings.VM_TYPES.MOBILE_VM.ordinal();
+        } else {
+            vmType = SimSettings.VM_TYPES.EDGE_VM.ordinal();
+        }
+        
+        // 根据设备类型选择VM
+        if (deviceId == SimSettings.CLOUD_DATACENTER_ID) {
+            return getCloudServerVm();
+        } else if (deviceId == SimSettings.MOBILE_DATACENTER_ID) {
+            return getMobileDeviceVm(task.getMobileDeviceId());
+        } else {
+            return getEdgeServerVm(deviceId);
+        }
     }
 
     /**
@@ -144,18 +174,5 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
     @Override
     public void startEntity() {
         // 启动实体
-    }
-    
-    /**
-     * 获取任务执行决策类型
-     */
-    private int getExecutionDecisionType(int deviceId) {
-        if (deviceId == SimSettings.CLOUD_DATACENTER_ID) {
-            return TaskOffloadingEngine.CLOUD_EXECUTION;
-        } else if (deviceId >= 0 && deviceId < simManager.getUAVManager().getUAVs().size()) {
-            return TaskOffloadingEngine.UAV_EXECUTION;
-        } else {
-            return TaskOffloadingEngine.LOCAL_EXECUTION;
-        }
     }
 }

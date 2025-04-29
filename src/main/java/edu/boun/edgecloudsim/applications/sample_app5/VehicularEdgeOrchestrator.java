@@ -12,7 +12,7 @@
 package edu.boun.edgecloudsim.applications.sample_app5;
 
 import java.util.stream.DoubleStream;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import org.cloudbus.cloudsim.Vm;
 import org.cloudbus.cloudsim.core.CloudSim;
 import org.cloudbus.cloudsim.core.SimEvent;

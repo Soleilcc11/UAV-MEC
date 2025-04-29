@@ -17,7 +17,7 @@
 package edu.boun.edgecloudsim.edge_client;
 
 import org.cloudbus.cloudsim.UtilizationModel;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.SimLogger;
 

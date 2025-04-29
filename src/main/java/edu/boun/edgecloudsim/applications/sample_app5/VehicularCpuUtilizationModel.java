@@ -43,7 +43,7 @@ public class VehicularCpuUtilizationModel implements UtilizationModel {
 				datacenterId == VehicularEdgeOrchestrator.CLOUD_DATACENTER_VIA_RSU)
 			index = 10;
 
-		return SimSettings.getInstance().getTaskLookUpTable()[task.getTaskType()][index];
+		return ((double[][]) SimSettings.getInstance().getTaskLookUpTable())[task.getTaskType()][index];
 	}
 
 	public void setTask(Task _task){
@@ -62,6 +62,6 @@ public class VehicularCpuUtilizationModel implements UtilizationModel {
 			SimLogger.printLine("Unknown VM Type! Terminating simulation...");
 			System.exit(1);
 		}
-		return SimSettings.getInstance().getTaskLookUpTable()[task.getTaskType()][index];
+		return ((double[][]) SimSettings.getInstance().getTaskLookUpTable())[task.getTaskType()][index];
 	}
 }

@@ -7,6 +7,8 @@ import org.w3c.dom.Document;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.File;
+import edu.boun.edgecloudsim.core.SimSettingsExtensions;
+
 
 
 import edu.boun.edgecloudsim.uav.UAVMECScenarioFactory;
@@ -48,6 +50,10 @@ public class SimSettings {
     public double getWlanBandwidth() { return 100; }
     public double getWanBandwidth() { return 50; }
     public double getWanPropagationDelay() { return 0.2; }
+    public double getMipsForCloudVM() {
+        // Return the appropriate MIPS value for cloud VMs
+        return 1000.0; // Replace with the actual value or logic
+    }
     
     // 添加边缘数据中心数量获取方法
     public int getNumOfEdgeDatacenters() {

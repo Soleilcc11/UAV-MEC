@@ -1,18 +1,21 @@
 package edu.boun.edgecloudsim.applications.sample_app1; // 路径根据实际情况修改
 
+import java.io.IOException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 import org.cloudbus.cloudsim.Log;
 import org.cloudbus.cloudsim.core.CloudSim;
 
 import edu.boun.edgecloudsim.core.ScenarioFactory;
 import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
+import edu.boun.edgecloudsim.core.SimSettingsExtensions;
 import edu.boun.edgecloudsim.utils.SimLogger;
 import edu.boun.edgecloudsim.utils.SimUtils;
+import edu.boun.edgecloudsim.utils.SimUtilsExtensions;
 
 public class MainApp {
     
@@ -26,9 +29,9 @@ public class MainApp {
     /**
      * 主方法入口点
      */
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         // 解析命令行参数
-        SimSettings.getInstance().setSimulationParameters();
+        SimSettingsExtensions.initializeSimulationParameters(SimSettings.getInstance());
         
         // 禁止输出时间戳
         boolean experimentalTimeStamp = false;
@@ -88,7 +91,7 @@ public class MainApp {
         
         // 准备输出文件夹
         if (outputFolder.isEmpty())
-            outputFolder = SimUtils.getOutputFolder();
+            outputFolder = SimUtilsExtensions.generateOutputFolder(null);
         SimLogger.getInstance().setOutputFolder(outputFolder);
         
         // 创建日志文件
@@ -96,9 +99,11 @@ public class MainApp {
         Date simulationStartDate = Calendar.getInstance().getTime();
         String simulationStartTime = df.format(simulationStartDate);
         
-        SimLogger.getInstance().simStarted(outputFolder, orchestratorPolicy, simScenario, numOfMobileDevice);
-        SimLogger.getInstance().printLine("Simulation started at " + simulationStartTime);
-        SimLogger.getInstance().printLine("----------------------------------------------------------------------");
+        String resultFileName = "SIMRESULT_" + simScenario + "_" + orchestratorPolicy + "_" + numOfMobileDevice + "DEVICES";
+        SimLogger.getInstance().simStarted(outputFolder + "/" + resultFileName, numOfMobileDevice);
+
+        SimLogger.printLine("Simulation started at " + simulationStartTime);
+        SimLogger.printLine("----------------------------------------------------------------------");
         
         // 初始化 CloudSim 库
         int num_user = 2;
@@ -119,6 +124,6 @@ public class MainApp {
         // 处理结果
         Date simulationEndDate = Calendar.getInstance().getTime();
         String simulationEndTime = df.format(simulationEndDate);
-        SimLogger.getInstance().simStopped(simulationEndTime);
+        SimLogger.getInstance().simStopped();
     }
 }

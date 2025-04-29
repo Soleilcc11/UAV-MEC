@@ -28,8 +28,8 @@ public class VehicularLoadGenerator extends LoadGeneratorModel{
 			int randomTaskType = -1;
 			double taskTypeSelector = SimUtils.getRandomDoubleNumber(0,100);
 			double taskTypePercentage = 0;
-			for (int j=0; j<SimSettings.getInstance().getTaskLookUpTable().length; j++) {
-				taskTypePercentage += SimSettings.getInstance().getTaskLookUpTable()[j][0];
+			for (int j=0; j<((double[][]) SimSettings.getInstance().getTaskLookUpTable()).length; j++) {
+				taskTypePercentage += ((double[][]) SimSettings.getInstance().getTaskLookUpTable())[j][0];
 				if(taskTypeSelector <= taskTypePercentage){
 					randomTaskType = j;
 					break;
@@ -42,9 +42,9 @@ public class VehicularLoadGenerator extends LoadGeneratorModel{
 
 			taskTypeOfDevices[i] = randomTaskType;
 
-			double poissonMean = SimSettings.getInstance().getTaskLookUpTable()[randomTaskType][2];
-			double activePeriod = SimSettings.getInstance().getTaskLookUpTable()[randomTaskType][3];
-			double idlePeriod = SimSettings.getInstance().getTaskLookUpTable()[randomTaskType][4];
+			double poissonMean = ((double[][]) SimSettings.getInstance().getTaskLookUpTable())[randomTaskType][2];
+			double activePeriod = ((double[][]) SimSettings.getInstance().getTaskLookUpTable())[randomTaskType][3];
+			double idlePeriod = ((double[][]) SimSettings.getInstance().getTaskLookUpTable())[randomTaskType][4];
 			double activePeriodStartTime = SimUtils.getRandomDoubleNumber(
 					SimSettings.CLIENT_ACTIVITY_START_TIME, 
 					SimSettings.CLIENT_ACTIVITY_START_TIME * 2);  //active period starts shortly after the simulation started (e.g. 10 seconds)
@@ -73,16 +73,16 @@ public class VehicularLoadGenerator extends LoadGeneratorModel{
 					continue;
 				}
 
-				long inputFileSize = (long)SimSettings.getInstance().getTaskLookUpTable()[randomTaskType][5];
+				long inputFileSize = (long)((double[][])SimSettings.getInstance().getTaskLookUpTable())[randomTaskType][5];
 				long inputFileSizeBias = inputFileSize / 10;
 
-				long outputFileSize =(long)SimSettings.getInstance().getTaskLookUpTable()[randomTaskType][6];
+				long outputFileSize = (long)((double[][])SimSettings.getInstance().getTaskLookUpTable())[randomTaskType][6];
 				long outputFileSizeBias = outputFileSize / 10;
 
-				long length = (long)SimSettings.getInstance().getTaskLookUpTable()[randomTaskType][7];	
+				long length = (long)((double[][])SimSettings.getInstance().getTaskLookUpTable())[randomTaskType][7];	
 				long lengthBias = length / 10;
 
-				int pesNumber = (int)SimSettings.getInstance().getTaskLookUpTable()[randomTaskType][8];
+				int pesNumber = (int)((double[][])SimSettings.getInstance().getTaskLookUpTable())[randomTaskType][8];
 
 				inputFileSize = SimUtils.getRandomLongNumber(inputFileSize - inputFileSizeBias, inputFileSize + inputFileSizeBias);
 				outputFileSize = SimUtils.getRandomLongNumber(outputFileSize - outputFileSizeBias, outputFileSize + outputFileSizeBias);

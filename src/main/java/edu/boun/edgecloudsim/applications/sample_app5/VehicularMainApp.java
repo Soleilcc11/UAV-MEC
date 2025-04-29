@@ -13,6 +13,7 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
+import edu.boun.edgecloudsim.utils.ArrayUtils;
 
 import org.cloudbus.cloudsim.Log;
 import org.cloudbus.cloudsim.core.CloudSim;
@@ -20,6 +21,7 @@ import org.cloudbus.cloudsim.core.CloudSim;
 import edu.boun.edgecloudsim.core.ScenarioFactory;
 import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
+import edu.boun.edgecloudsim.core.SimSettingsExtensions;
 import edu.boun.edgecloudsim.utils.SimLogger;
 import edu.boun.edgecloudsim.utils.SimUtils;
 
@@ -58,9 +60,13 @@ public class VehicularMainApp {
 
 		//load settings from configuration file
 		SimSettings SS = SimSettings.getInstance();
-		if(SS.initialize(configFile, edgeDevicesFile, applicationsFile) == false) {
-			SimLogger.printLine("cannot initialize simulation settings!");
-			System.exit(1);
+		try {
+			SS.initialize(configFile, edgeDevicesFile, applicationsFile);
+			// If we reach here, initialization was successful
+		} catch (Exception e) {
+			SimLogger.printLine("Cannot initialize simulation settings!");
+			e.printStackTrace();
+			System.exit(0);
 		}
 
 		if(SS.getFileLoggingEnabled()){
@@ -96,8 +102,8 @@ public class VehicularMainApp {
 		SimLogger.printLine("Scenario started at " + now);
 		SimLogger.printLine("Scenario: " + simulationScenario + " - Policy: " + orchestratorPolicy + " - #iteration: " + iterationNumber);
 		SimLogger.printLine("Duration: " + SS.getSimulationTime()/60 + " min (warm up period: "+ SS.getWarmUpPeriod()/60 +" min) - #devices: " + numOfMobileDevice);
-		SimLogger.getInstance().simStarted(outputFolder, "SIMRESULT_" + simulationScenario + "_"  + orchestratorPolicy + "_" + numOfMobileDevice + "DEVICES");
-
+		String resultFileName = "SIMRESULT_" + simulationScenario + "_" + orchestratorPolicy + "_" + numOfMobileDevice + "DEVICES";
+		SimLogger.getInstance().simStarted(outputFolder + "/" + resultFileName, numOfMobileDevice);
 		try
 		{
 			// First step: Initialize the CloudSim package. It should be called

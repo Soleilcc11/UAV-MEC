@@ -182,26 +182,30 @@ public class FuzzyExperimentalNetworkModel extends NetworkModel {
 	public void initialize() {
 		wanClients = new int[SimSettings.getInstance().getNumOfEdgeDatacenters()];  //we have one access point for each datacenter
 		wlanClients = new int[SimSettings.getInstance().getNumOfEdgeDatacenters()];  //we have one access point for each datacenter
-
-		int numOfApp = SimSettings.getInstance().getTaskLookUpTable().length;
+	
+		// 使用ArrayUtils获取数组长度
+		int numOfApp = ArrayUtils.length(SimSettings.getInstance().getTaskLookUpTable());
 		SimSettings SS = SimSettings.getInstance();
+		
 		for(int taskIndex=0; taskIndex<numOfApp; taskIndex++) {
-			if(SS.getTaskLookUpTable()[taskIndex][0] == 0) {
+			// 使用ArrayUtils安全访问数组元素
+			if(ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 0) == 0) {
 				SimLogger.printLine("Usage percentage of task " + taskIndex + " is 0! Terminating simulation...");
 				System.exit(0);
 			}
-			else{
-				double weight = SS.getTaskLookUpTable()[taskIndex][0]/(double)100;
+			else {
+				// 使用ArrayUtils获取并计算权重
+				double weight = ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 0)/(double)100;
 				
 				//assume half of the tasks use the MAN at the beginning
-				ManPoissonMeanForDownload += ((SS.getTaskLookUpTable()[taskIndex][2])*weight) * 4;
+				ManPoissonMeanForDownload += (ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 2)*weight) * 4;
 				ManPoissonMeanForUpload = ManPoissonMeanForDownload;
 				
-				avgManTaskInputSize += SS.getTaskLookUpTable()[taskIndex][5]*weight;
-				avgManTaskOutputSize += SS.getTaskLookUpTable()[taskIndex][6]*weight;
+				avgManTaskInputSize += ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 5)*weight;
+				avgManTaskOutputSize += ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 6)*weight;
 			}
 		}
-
+	
 		ManPoissonMeanForDownload = ManPoissonMeanForDownload/numOfApp;
 		ManPoissonMeanForUpload = ManPoissonMeanForUpload/numOfApp;
 		avgManTaskInputSize = avgManTaskInputSize/numOfApp;

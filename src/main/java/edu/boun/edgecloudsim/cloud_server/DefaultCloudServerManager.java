@@ -29,6 +29,7 @@ import org.cloudbus.cloudsim.provisioners.RamProvisionerSimple;
 
 import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
+import edu.boun.edgecloudsim.core.SimSettingsExtensions;
 
 public class DefaultCloudServerManager extends CloudServerManager{
 
@@ -62,13 +63,13 @@ public class DefaultCloudServerManager extends CloudServerManager{
 			vmList.add(i, new ArrayList<CloudVM>());
 			for(int j = 0; j < SimSettings.getInstance().getNumOfCloudVMsPerHost(); j++){
 				String vmm = "Xen";
-				int numOfCores = SimSettings.getInstance().getCoreForCloudVM();
-				double mips = SimSettings.getInstance().getMipsForCloudVM();
-				int ram = SimSettings.getInstance().getRamForCloudVM();
-				long storage = SimSettings.getInstance().getStorageForCloudVM();
+				// Use SimSettingsExtensions for missing methods
+				int numOfCores = SimSettingsExtensions.getCoreForCloudVM(SimSettings.getInstance());
+				double mips = SimSettingsExtensions.getMipsForCloudVM(SimSettings.getInstance());
+				int ram = SimSettingsExtensions.getRamForCloudVM(SimSettings.getInstance());
+				long storage = SimSettingsExtensions.getStorageForCloudVM(SimSettings.getInstance());
 				long bandwidth = 0;
-				
-				//VM Parameters		
+								//VM Parameters		
 				CloudVM vm = new CloudVM(vmCounter, brokerId, mips, numOfCores, ram, bandwidth, storage, vmm, new CloudletSchedulerTimeShared());
 				vmList.get(i).add(vm);
 				vmCounter++;
@@ -133,13 +134,14 @@ public class DefaultCloudServerManager extends CloudServerManager{
 		
 		for (int i = 0; i < SimSettings.getInstance().getNumOfCloudHost(); i++) {
 			int numOfVMPerHost = SimSettings.getInstance().getNumOfCloudVMsPerHost();
-			int numOfCores = SimSettings.getInstance().getCoreForCloudVM() * numOfVMPerHost;
-			double mips = SimSettings.getInstance().getMipsForCloudVM() * numOfVMPerHost;
-			int ram = SimSettings.getInstance().getRamForCloudVM() * numOfVMPerHost;
-			long storage = SimSettings.getInstance().getStorageForCloudVM() * numOfVMPerHost;
-			long bandwidth = 0;
-			
-			// 2. A Machine contains one or more PEs or CPUs/Cores. Therefore, should
+				String vmm = "Xen";
+				int numOfCores = SimSettingsExtensions.getCoreForCloudVM(SimSettings.getInstance());
+				double mips = SimSettingsExtensions.getMipsForCloudVM(SimSettings.getInstance());
+				int ram = SimSettingsExtensions.getRamForCloudVM(SimSettings.getInstance());
+				long storage = SimSettingsExtensions.getStorageForCloudVM(SimSettings.getInstance());
+				long bandwidth = 0;
+							
+							// 2. A Machine contains one or more PEs or CPUs/Cores. Therefore, should
 			//    create a list to store these PEs before creating
 			//    a Machine.
 			List<Pe> peList = new ArrayList<Pe>();

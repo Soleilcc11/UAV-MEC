@@ -9,7 +9,7 @@
  */
 
  package edu.boun.edgecloudsim.network;
-
+ import edu.boun.edgecloudsim.utils.ArrayUtils;
  import org.cloudbus.cloudsim.core.CloudSim;
  
  import edu.boun.edgecloudsim.core.SimManager;
@@ -179,24 +179,23 @@
 	 }
  
 	 private double getWlanDownloadDelay(Location accessPointLocation, double time) {
-		 return calculateMM1(0,
-				 SimSettings.getInstance().getWlanBandwidth(),
+		 return calculateMM1(0.0,
+				 (int) SimSettings.getInstance().getWlanBandwidth(),
 				 WlanPoissonMean,
 				 avgTaskOutputSize,
 				 getDeviceCount(accessPointLocation, time));
 	 }
  
 	 private double getWlanUploadDelay(Location accessPointLocation, double time) {
-		 return calculateMM1(0,
-				 SimSettings.getInstance().getWlanBandwidth(),
+		 return calculateMM1(0.0,
+				 (int) SimSettings.getInstance().getWlanBandwidth(),
 				 WlanPoissonMean,
 				 avgTaskInputSize,
 				 getDeviceCount(accessPointLocation, time));
 	 }
  
 	 private double getWanDownloadDelay(Location accessPointLocation, double time) {
-		 // 修复: 将double转换为int时使用Math.round或显式转换
-		 int bandwidth = SimSettings.getInstance().getWanBandwidth();
+		 int bandwidth = (int)SimSettings.getInstance().getWanBandwidth();
 		 return calculateMM1(SimSettings.getInstance().getWanPropagationDelay(),
 				 bandwidth,
 				 WanPoissonMean,
@@ -206,7 +205,7 @@
  
 	 private double getWanUploadDelay(Location accessPointLocation, double time) {
 		 // 修复: 将double转换为int时使用Math.round或显式转换
-		 int bandwidth = SimSettings.getInstance().getWanBandwidth();
+		 int bandwidth = (int) SimSettings.getInstance().getWanBandwidth();
 		 return calculateMM1(SimSettings.getInstance().getWanPropagationDelay(),
 				 bandwidth,
 				 WanPoissonMean,
@@ -216,25 +215,21 @@
  
 	 @Override
 	 public void uploadStarted(Location accessPointLocation, int destDeviceId) {
-		 // TODO Auto-generated method stub
  
 	 }
  
 	 @Override
 	 public void uploadFinished(Location accessPointLocation, int destDeviceId) {
-		 // TODO Auto-generated method stub
  
 	 }
  
 	 @Override
 	 public void downloadStarted(Location accessPointLocation, int sourceDeviceId) {
-		 // TODO Auto-generated method stub
  
 	 }
  
 	 @Override
 	 public void downloadFinished(Location accessPointLocation, int sourceDeviceId) {
-		 // TODO Auto-generated method stub
  
 	 }
  }

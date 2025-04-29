@@ -1535,4 +1535,34 @@ public class EnhancedPythonInterface {
         void onSuccess(T result);
         void onFailure(Exception e);
     }
+    public void close() {
+        // 关闭连接
+        disconnect();
+        
+        // 停止请求处理
+        processingQueue = false;
+        
+        // 关闭线程池
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        
+        // 关闭超时调度器
+        requestTimeoutScheduler.shutdown();
+        try {
+            if (!requestTimeoutScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                requestTimeoutScheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            requestTimeoutScheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+    
 }

@@ -9,6 +9,7 @@
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/applications/sample_app4/FuzzyMobileDeviceManager.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/network/NetworkModel.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/applications/sample_app5/OrchestratorStatisticLogger.java
+/Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/utils/SimUtilsExtensions.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/edge_client/mobile_processing_unit/MobileVmAllocationPolicy_Custom.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/applications/sample_app3/SampleNetworkModel.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/uav/StateActionManager.java
@@ -50,7 +51,9 @@
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/applications/sample_app2/SampleEdgeOrchestrator.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/uav/RewardCalculator.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/task_generator/LoadGeneratorModel.java
+/Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/utils/ArrayUtils.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/applications/sample_app1/SampleScenarioFactory.java
+/Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/core/SimSettingsExtensions.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/applications/sample_app5/VehicularMobileDeviceManager.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/cloud_server/CloudVmAllocationPolicy_Custom.java
 /Users/soleilcc/uavmec-offloadingtask/UAV-MEC/src/main/java/edu/boun/edgecloudsim/applications/sample_app5/VehicularEdgeServerManager.java

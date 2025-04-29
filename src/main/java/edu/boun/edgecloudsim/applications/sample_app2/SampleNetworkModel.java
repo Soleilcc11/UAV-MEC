@@ -19,6 +19,7 @@ package edu.boun.edgecloudsim.applications.sample_app2;
 
 import org.cloudbus.cloudsim.core.CloudSim;
 import edu.boun.edgecloudsim.utils.ArrayUtils;
+
 import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.edge_client.Task;
@@ -190,23 +191,25 @@ public class SampleNetworkModel extends NetworkModel {
 		wanClients = new int[SimSettings.getInstance().getNumOfEdgeDatacenters()];  //we have one access point for each datacenter
 		wlanClients = new int[SimSettings.getInstance().getNumOfEdgeDatacenters()];  //we have one access point for each datacenter
 
-		int numOfApp = SimSettings.getInstance().getTaskLookUpTable().length;
+		int numOfApp = ArrayUtils.length(SimSettings.getInstance().getTaskLookUpTable());
 		SimSettings SS = SimSettings.getInstance();
 		for(int taskIndex=0; taskIndex<numOfApp; taskIndex++) {
-			if(SS.getTaskLookUpTable()[taskIndex][0] == 0) {
-				SimLogger.printLine("Usage percentage of task " + taskIndex + " is 0! Terminating simulation...");
-				System.exit(0);
-			}
-			else{
-				double weight = SS.getTaskLookUpTable()[taskIndex][0]/(double)100;
+			// 使用ArrayUtils获取数组值
+			if(ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 0) == 0) {
+				SimLogger.printLine("Usage percentage of task " + taskIndex + " is 0! Terminating simulation..."); 
+				System.exit(0); 
+			} 
+			else{ 
+				// 使用ArrayUtils获取所有数组值
+				double weight = ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 0)/(double)100; 
 				
-				//assume half of the tasks use the MAN at the beginning
-				ManPoissonMeanForDownload += ((SS.getTaskLookUpTable()[taskIndex][2])*weight) * 4;
-				ManPoissonMeanForUpload = ManPoissonMeanForDownload;
+				//assume half of the tasks use the MAN at the beginning 
+				ManPoissonMeanForDownload += (ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 2)*weight) * 4; 
+				ManPoissonMeanForUpload = ManPoissonMeanForDownload; 
 				
-				avgManTaskInputSize += SS.getTaskLookUpTable()[taskIndex][5]*weight;
-				avgManTaskOutputSize += SS.getTaskLookUpTable()[taskIndex][6]*weight;
-			}
+				avgManTaskInputSize += ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 5)*weight; 
+				avgManTaskOutputSize += ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 6)*weight; 
+			} 
 		}
 
 		ManPoissonMeanForDownload = ManPoissonMeanForDownload/numOfApp;

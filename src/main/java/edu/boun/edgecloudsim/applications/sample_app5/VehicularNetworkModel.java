@@ -131,7 +131,7 @@ public class VehicularNetworkModel extends NetworkModel {
 	public void initialize() {
 		SimSettings SS = SimSettings.getInstance();
 
-		int numOfApp = SimSettings.getInstance().getTaskLookUpTable().length;
+		int numOfApp = ArrayUtils.length(SimSettings.getInstance().getTaskLookUpTable());
 		int numOfAccessPoint = SimSettings.getInstance().getNumOfEdgeDatacenters();
 
 		wlanMMPPForDownload = new MMPPWrapper[numOfAccessPoint];
@@ -162,11 +162,12 @@ public class VehicularNetworkModel extends NetworkModel {
 
 		//Calculate interarrival time and task sizes
 		for(int taskIndex=0; taskIndex<numOfApp; taskIndex++) {
-			double percentageOfAppUsage = SS.getTaskLookUpTable()[taskIndex][0];
-			double poissonOfApp = SS.getTaskLookUpTable()[taskIndex][2];
-			double taskInputSize = SS.getTaskLookUpTable()[taskIndex][5];
-			double taskOutputSize = SS.getTaskLookUpTable()[taskIndex][6];
-
+			// 使用ArrayUtils安全获取数组元素
+			double percentageOfAppUsage = ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 0); 
+			double poissonOfApp = ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 2);
+			double taskInputSize = ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 5);
+			double taskOutputSize = ArrayUtils.getDoubleValueFromTable(SS.getTaskLookUpTable(), taskIndex, 6);
+			
 			if(percentageOfAppUsage <= 0 && percentageOfAppUsage > 100) {
 				SimLogger.printLine("Usage percantage of task " + taskIndex + " is invalid (" +
 						percentageOfAppUsage + ")! Terminating simulation...");

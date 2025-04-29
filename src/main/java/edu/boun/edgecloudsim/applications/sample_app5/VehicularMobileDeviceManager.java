@@ -395,7 +395,7 @@ public class VehicularMobileDeviceManager extends MobileDeviceManager {
 			Task task = (Task) ev.getData();
 
 			String taskName = SimSettings.getInstance().getTaskName(task.getTaskType());
-			double taskProperty[] = SimSettings.getInstance().getTaskProperties(taskName);
+			double taskProperty[] = ArrayUtils.toDoubleArray(SimSettings.getInstance().getTaskProperties(taskName));
 			double serviceTime = CloudSim.clock() - task.getCreationTime();
 			double delaySensitivity = taskProperty[12];
 			double maxDelayRequirement = taskProperty[13];

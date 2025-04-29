@@ -56,7 +56,7 @@ public class VehicularEdgeOrchestrator extends EdgeOrchestrator {
 		statisticLogger = new OrchestratorStatisticLogger();
 		trainerLogger = new OrchestratorTrainerLogger();
 
-		double lookupTable[][] = SimSettings.getInstance().getTaskLookUpTable();
+		double[][] lookupTable = (double[][]) SimSettings.getInstance().getTaskLookUpTable();
 		//assume the first app has the lowest and the last app has the highest task length value
 		double minTaskLength = lookupTable[0][7];
 		double maxTaskLength = lookupTable[lookupTable.length-1][7];
@@ -185,7 +185,7 @@ public class VehicularEdgeOrchestrator extends EdgeOrchestrator {
 			else
 				probabilities = new double[] {0.23, 0.60, 0.17};
 
-			double randomNumber = SimUtils.getRandomDoubleNumber(0, 1);
+			double randomNumber =(double) SimUtils.getRandomDoubleNumber(0, 1);
 			double lastPercentagte = 0;
 			boolean resultFound = false;
 			for(int i=0; i<probabilities.length; i++) {
@@ -270,8 +270,9 @@ public class VehicularEdgeOrchestrator extends EdgeOrchestrator {
 					(isGsmFaster ? gsmUploadDelay : wanUploadDelay) +
 					(isGsmFaster ? gsmDownloadDelay : wanDownloadDelay);
 
-			double taskArrivalRate = SimSettings.getInstance().getTaskLookUpTable()[task.getTaskType()][2];
-			double maxDelay = SimSettings.getInstance().getTaskLookUpTable()[task.getTaskType()][13] * (double)6;
+			double[][] taskLookUpTable = (double[][]) SimSettings.getInstance().getTaskLookUpTable();
+			double taskArrivalRate = taskLookUpTable[task.getTaskType()][2];
+			double maxDelay = taskLookUpTable[task.getTaskType()][13] * 6;
 
 			double Pi = GTH.getPi(task.getMobileDeviceId(), taskArrivalRate, expectedEdgeDelay, expectedCloudDelay, maxDelay);
 

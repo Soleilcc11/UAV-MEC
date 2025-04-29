@@ -90,7 +90,7 @@ public class DefaultEdgeServerManager extends EdgeServerManager{
 					double mips = Double.parseDouble(vmElement.getElementsByTagName("mips").item(0).getTextContent());
 					int ram = Integer.parseInt(vmElement.getElementsByTagName("ram").item(0).getTextContent());
 					long storage = Long.parseLong(vmElement.getElementsByTagName("storage").item(0).getTextContent());
-					long bandwidth = SimSettings.getInstance().getWlanBandwidth() / (hostNodeList.getLength()+vmNodeList.getLength());
+					long bandwidth = (long) SimSettings.getInstance().getWlanBandwidth() / (hostNodeList.getLength()+vmNodeList.getLength());
 					
 					//VM Parameters		
 					EdgeVM vm = new EdgeVM(vmCounter, brokerId, mips, numOfCores, ram, bandwidth, storage, vmm, new CloudletSchedulerTimeShared());
@@ -185,7 +185,7 @@ public class DefaultEdgeServerManager extends EdgeServerManager{
 			double mips = Double.parseDouble(hostElement.getElementsByTagName("mips").item(0).getTextContent());
 			int ram = Integer.parseInt(hostElement.getElementsByTagName("ram").item(0).getTextContent());
 			long storage = Long.parseLong(hostElement.getElementsByTagName("storage").item(0).getTextContent());
-			long bandwidth = SimSettings.getInstance().getWlanBandwidth() / hostNodeList.getLength();
+			long bandwidth = (long) SimSettings.getInstance().getWlanBandwidth() / hostNodeList.getLength();
 			
 			// 2. A Machine contains one or more PEs or CPUs/Cores. Therefore, should
 			//    create a list to store these PEs before creating

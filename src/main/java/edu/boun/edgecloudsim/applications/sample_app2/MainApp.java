@@ -13,7 +13,9 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
-
+import edu.boun.edgecloudsim.utils.ArrayUtils;
+import edu.boun.edgecloudsim.core.SimSettingsExtensions;
+import edu.boun.edgecloudsim.utils.SimUtilsExtensions;
 import org.cloudbus.cloudsim.Log;
 import org.cloudbus.cloudsim.core.CloudSim;
 
@@ -57,8 +59,12 @@ public class MainApp {
 
 		//load settings from configuration file
 		SimSettings SS = SimSettings.getInstance();
-		if(SS.initialize(configFile, edgeDevicesFile, applicationsFile) == false){
-			SimLogger.printLine("cannot initialize simulation settings!");
+		try {
+			SS.initialize(configFile, edgeDevicesFile, applicationsFile);
+			// If we reach here, initialization was successful
+		} catch (Exception e) {
+			SimLogger.printLine("Cannot initialize simulation settings!");
+			e.printStackTrace();
 			System.exit(0);
 		}
 
@@ -87,8 +93,9 @@ public class MainApp {
 					SimLogger.printLine("Scenario started at " + now);
 					SimLogger.printLine("Scenario: " + simScenario + " - Policy: " + orchestratorPolicy + " - #iteration: " + iterationNumber);
 					SimLogger.printLine("Duration: " + SS.getSimulationTime()/60 + " min (warm up period: "+ SS.getWarmUpPeriod()/60 +" min) - #devices: " + j);
-					SimLogger.getInstance().simStarted(outputFolder,"SIMRESULT_" + simScenario + "_"  + orchestratorPolicy + "_" + j + "DEVICES");
-
+					String resultFileName = "SIMRESULT_" + simScenario + "_" + orchestratorPolicy + "_" + j + "DEVICES";
+					SimLogger.getInstance().simStarted(outputFolder + "/" + resultFileName, j);
+					
 					try
 					{
 						// First step: Initialize the CloudSim package. It should be called

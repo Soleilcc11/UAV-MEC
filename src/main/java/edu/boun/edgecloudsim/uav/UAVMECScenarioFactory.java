@@ -80,13 +80,10 @@ public class UAVMECScenarioFactory implements ScenarioFactory {
             @Override
             public void initialize() {}
             
-            @Override
             public void startEntity() {}
             
-            @Override
             public void shutdownEntity() {}
             
-            @Override
             public void processEvent(SimEvent ev) {}
             
             @Override
@@ -129,13 +126,11 @@ public class UAVMECScenarioFactory implements ScenarioFactory {
             @Override
             public void initialize() {}
             
-            @Override
+            
             public void startEntity() {}
             
-            @Override
             public void shutdownEntity() {}
             
-            @Override
             public void processEvent(SimEvent ev) {}
             
             @Override

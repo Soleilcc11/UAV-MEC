@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import edu.boun.edgecloudsim.utils.ArrayUtils;
+
 import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.SimLogger;
@@ -250,7 +252,7 @@ public class TaskOffloadingEngine {
         double[] state = stateActionManager.getLastState();
         double[] action = stateActionManager.getLastAction();
         double[] nextState = stateActionManager.generateState();
-        double reward = rewardCalculator.calculateReward(latency, task.getTotalMI());
+        double reward = rewardCalculator.calculateReward(latency, (long) task.getTotalMI());
         
         // 异步训练RL模型
         pythonInterface.trainAsync(state, action, reward, nextState, false, 

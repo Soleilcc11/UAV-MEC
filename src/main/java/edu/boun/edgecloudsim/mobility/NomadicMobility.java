@@ -22,6 +22,8 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import edu.boun.edgecloudsim.utils.ArrayUtils;
+import edu.boun.edgecloudsim.core.SimSettingsExtensions;
 
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.Location;
@@ -39,9 +41,9 @@ public class NomadicMobility extends MobilityModel {
 	@Override
 	public void initialize() {
 		treeMapArray = new ArrayList<TreeMap<Double, Location>>();
-		
+    
 		ExponentialDistribution[] expRngList = new ExponentialDistribution[SimSettings.getInstance().getNumOfEdgeDatacenters()];
-
+		
 		//create random number generator for each place
 		Document doc = SimSettings.getInstance().getEdgeDevicesDocument();
 		NodeList datacenterList = doc.getElementsByTagName("datacenter");
@@ -52,8 +54,14 @@ public class NomadicMobility extends MobilityModel {
 			String attractiveness = location.getElementsByTagName("attractiveness").item(0).getTextContent();
 			int placeTypeIndex = Integer.parseInt(attractiveness);
 			
-			expRngList[i] = new ExponentialDistribution(SimSettings.getInstance().getMobilityLookUpTable()[placeTypeIndex]);
+			// Fix: Use either SimSettingsExtensions or ArrayUtils
+			// Option 1: Use SimSettingsExtensions
+			Object mobilityTable = SimSettingsExtensions.getMobilityLookUpTable(SimSettings.getInstance());
+			double mobilityValue = ArrayUtils.getDoubleValueFromTable(mobilityTable, placeTypeIndex, 0);
+		
+			expRngList[i] = new ExponentialDistribution(mobilityValue);
 		}
+	
 		
 		//initialize tree maps and position of mobile devices
 		for(int i=0; i<numberOfMobileDevices; i++) {

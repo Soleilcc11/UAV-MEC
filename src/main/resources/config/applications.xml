@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<applications>
+    <application name="REAL_TIME_VIDEO">
+        <usage_percentage>100</usage_percentage>
+        <prob_cloud_selection>20</prob_cloud_selection>
+        <poisson_interarrival>1</poisson_interarrival>
+        <active_period>100</active_period>
+        <idle_period>1</idle_period>
+        <data_upload>1500</data_upload>
+        <data_download>25</data_download>
+        <task_length>3000</task_length>
+        <required_core>1</required_core>
+        <vm_utilization_on_edge>20</vm_utilization_on_edge>
+        <vm_utilization_on_cloud>5</vm_utilization_on_cloud>
+        <vm_utilization_on_mobile>80</vm_utilization_on_mobile>
+        <delay_sensitivity>0.8</delay_sensitivity>
+        <max_delay_requirement>100</max_delay_requirement>
+    </application>
+</applications>

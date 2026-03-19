@@ -26,6 +26,8 @@ public class SimLogger {
     private boolean pendingLogs;
     private int iterationNumber;
     private int taskIdCounter;
+    private BufferedWriter performanceLogBW = null;
+    private String performanceLogFileName = null;
     
     // 各种指标统计
     private int numOfFailedTask;
@@ -90,6 +92,8 @@ public class SimLogger {
             requestedStorage = 0;
         }
     }
+
+
     
     /**
      * 私有构造函数
@@ -237,19 +241,36 @@ public class SimLogger {
     }
     
     /**
-     * 日志任务完成
+     * 将任务完成事件记录到文件
      */
-    public void taskCompleted(int taskId) {
-        LogItem task = taskMap.get(taskId);
-        
-        if(task == null) {
-            System.out.println("Cannot find task with ID: " + taskId);
+    public synchronized void taskCompleted(String taskId, double taskStartTime, double taskEndTime, double taskLength) {
+        // 检查任务ID有效性
+        if (taskId == null || taskId.isEmpty()) {
+            printLine("[ERROR] 尝试记录无效任务ID: " + taskId);
             return;
         }
         
-        // Record completion status
-        task.status = 1; // Completed
-        numOfProcessedTask++;
+        printLine("[任务完成] 任务ID:" + taskId + ", 开始时间:" + taskStartTime + 
+                  ", 结束时间:" + taskEndTime + ", 处理时间:" + (taskEndTime - taskStartTime) + 
+                  ", 任务长度:" + taskLength);
+        
+        try {
+            if(fileLogEnabled) {
+                BufferedWriter bw = new BufferedWriter(new FileWriter(outputFolder + "/task_log.csv", true));
+                bw.write(taskId + SimSettings.DELIMITER + 
+                        taskStartTime + SimSettings.DELIMITER + 
+                        taskEndTime + SimSettings.DELIMITER + 
+                        (taskEndTime - taskStartTime) + SimSettings.DELIMITER + 
+                        taskLength + System.lineSeparator());
+                bw.close();
+                
+                // 调试信息
+                printLine("[DEBUG] 已写入任务记录到文件: " + taskId);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            printLine("[ERROR] 写入任务日志时发生错误: " + e.getMessage());
+        }
     }
     
     /**
@@ -257,7 +278,7 @@ public class SimLogger {
      */
     public void taskFailed(int taskId, int reason) {
         LogItem task = taskMap.get(taskId);
-        
+        task.status = 1; // 设置状态为完成
         if(task == null) {
             System.out.println("Cannot find task with ID: " + taskId);
             return;
@@ -323,6 +344,55 @@ public class SimLogger {
      */
     public void setReturnTime(int taskId, double time) {
         taskMap.get(taskId).returnTime = time;
+    }
+    
+    /**
+     * 打开性能日志文件
+     */
+    public void openPerformanceLogFile() {
+        if (performanceLogBW != null)
+            return;
+            
+        try {
+            performanceLogFileName = outputFolder + "/performance_log.csv";
+            performanceLogBW = new BufferedWriter(new FileWriter(performanceLogFileName, false));
+        } catch (IOException e) {
+            printLine("打开性能日志文件时出错: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 写入性能日志文件
+     * @param line 要写入的行
+     */
+    public void writeToPerformanceLogFile(String line) {
+        if (performanceLogBW == null) {
+            openPerformanceLogFile();
+        }
+        
+        try {
+            performanceLogBW.write(line + "\n");
+            performanceLogBW.flush();
+        } catch (IOException e) {
+            printLine("写入性能日志文件时出错: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 关闭性能日志文件
+     */
+    public void closePerformanceLogFile() {
+        try {
+            if (performanceLogBW != null) {
+                performanceLogBW.close();
+                performanceLogBW = null;
+            }
+        } catch (IOException e) {
+            printLine("关闭性能日志文件时出错: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     /**

@@ -1,5 +1,6 @@
 package edu.boun.edgecloudsim.uav;
 
+import java.io.BufferedWriter;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
@@ -16,6 +17,8 @@ public class PerformanceMonitor {
     private Map<String, Double> metrics;
     private Map<String, Queue<Double>> metricHistory;
     private int historySize;
+    private BufferedWriter performanceLogBW;
+    private boolean performanceLogInitialized = false;
     
     /**
      * 构造函数
@@ -57,12 +60,28 @@ public class PerformanceMonitor {
             metricHistory.put(key, new LinkedList<>());
         }
     }
+
+    /**
+     * 初始化性能日志文件
+     */
+    public void initializePerformanceLog() {
+        try {
+            // 创建CSV文件头
+            String header = "Time,TaskCompletionRate,AverageLatency,EnergyEfficiency,UAVAverageEnergy,UAVAverageUtilization,UAVAverageQueueLength,UAVCommunicationQuality";
+            SimLogger.getInstance().writeToPerformanceLogFile(header);
+            performanceLogInitialized = true;
+            SimLogger.printLine("性能日志初始化成功");
+        } catch (Exception e) {
+            SimLogger.printLine("初始化性能日志时出错: " + e.getMessage());
+        }
+    }
     
     /**
      * 更新性能指标
      * @param timeSlot 当前时间片
      */
     public void updateMetrics(double timeSlot) {
+        
         // 获取当前系统状态
         UAVManager uavManager = simManager.getUAVManager();
         double simulationTime = simManager.getSimulationTime();
@@ -154,7 +173,6 @@ public class PerformanceMonitor {
      */
     private void logMetrics() {
         double currentTime = simManager.getSimulationTime();
-        
         // 每隔一定时间记录一次（例如每10秒）
         if (Math.round(currentTime) % 10 == 0) {
             SimLogger.printLine(String.format("===== 性能指标 (时间: %.2f) =====", currentTime));
@@ -171,8 +189,30 @@ public class PerformanceMonitor {
             SimLogger.printLine(String.format("UAV平均队列长度: %.2f", metrics.get("uav.averageQueueLength")));
             SimLogger.printLine(String.format("UAV通信质量: %.2f", metrics.get("uav.communicationQuality")));
         }
+        
+        // 添加CSV记录
+        try {
+            if (!performanceLogInitialized) {
+                // 如果日志还未初始化，先初始化
+                initializePerformanceLog();
+            }
+            
+            String csvLine = String.format("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f",
+                currentTime,
+                metrics.get("system.taskCompletionRate") * 100,
+                metrics.get("system.averageLatency"),
+                metrics.get("system.energyEfficiency"),
+                metrics.get("uav.averageEnergy"),
+                metrics.get("uav.averageUtilization") * 100,
+                metrics.get("uav.averageQueueLength"),
+                metrics.get("uav.communicationQuality"));
+            
+            SimLogger.getInstance().writeToPerformanceLogFile(csvLine);
+        } catch (Exception e) {
+            SimLogger.printLine("写入性能日志时出错: " + e.getMessage());
+        }
     }
-    
+
     /**
      * 获取当前指标值
      * @param key 指标键名

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<simulation_settings>
+    <general>
+        <simulation_time>10800</simulation_time>
+        <warm_up_period>60</warm_up_period>
+        <vm_load_check_interval>1</vm_load_check_interval>
+        <location_check_interval>1</location_check_interval>
+        <file_log_enabled>true</file_log_enabled>
+        <deep_file_log_enabled>true</deep_file_log_enabled>
+    </general>
+    <uav>
+        <num_of_uavs>20</num_of_uavs>
+        <uav_max_energy>10000</uav_max_energy>
+        <uav_initial_height>50</uav_initial_height>
+    </uav>
+    <simulation_space>
+        <x>1000</x>
+        <y>1000</y>
+        <z>200</z>
+    </simulation_space>
+    <scenario>
+        <single_tier>true</single_tier>
+        <two_tier>false</two_tier>
+        <two_tier_with_EO>false</two_tier_with_EO>
+    </scenario>
+    <orchestrator>
+        <random>true</random>
+        <ddpg>false</ddpg>
+    </orchestrator>
+</simulation_settings>

@@ -168,6 +168,7 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 	}
 
 	public void submitTask(TaskProperty edgeTask) {
+		
 		NetworkModel networkModel = SimManager.getInstance().getNetworkModel();
 		
 		//create a task

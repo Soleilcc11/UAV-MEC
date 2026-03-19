@@ -1,0 +1,36 @@
+# ----- 构建/编译产物（不推送） -----
+target/
+*.class
+edu/
+
+# ----- 运行/训练生成（不推送） -----
+results/
+saved_models/
+logs/
+sim_results/
+additional_results/
+thesis_results/
+thesis_results_v2/
+
+# ----- Python -----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+venv/
+.venv/
+env/
+
+# ----- 日志与临时 -----
+*.log
+*.log.*
+.DS_Store
+
+# ----- 可选：训练数据/大文件（若不想进库可取消注释） -----
+# results/*.json
+# *.h5
+# *.pt
+# *.pb

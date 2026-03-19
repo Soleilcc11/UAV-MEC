@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Random;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.cloudbus.cloudsim.core.SimEvent;
+
 import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.SimLogger;
@@ -17,6 +20,10 @@ public class UAVManager {
     private SimManager simManager;
     private List<UAV> uavList;
     private Random random;
+    private AtomicInteger completedTasks;
+    
+    // 定义任务完成事件类型
+    public static final int UAV_TASK_COMPLETED = 9999;
     
     /**
      * 构造函数
@@ -26,6 +33,7 @@ public class UAVManager {
         this.simManager = simManager;
         this.uavList = new ArrayList<>();
         this.random = new Random(42); // 固定随机种子以实现可重复的模拟
+        this.completedTasks = new AtomicInteger(0);
         
         // 在构造函数中初始化，因为simManager还没有完全设置好
     }
@@ -46,8 +54,8 @@ public class UAVManager {
             
             // 初始能量和处理能力
             double initialEnergy = simSettings.getUAVMaxEnergy();
-            double processingCapacity = 1000 + random.nextDouble() * 500; // 1000-1500 MIPS
-            
+            double processingCapacity = 1500 + random.nextDouble() * 1000; // 提高至1500-2500 MIPS
+
             UAV uav = new UAV(i, position, initialEnergy, processingCapacity);
             uavList.add(uav);
             
@@ -76,6 +84,7 @@ public class UAVManager {
             }
         }
     }
+    
     /**
      * 查找距离给定位置最近的UAV
      * @param x X坐标
@@ -112,14 +121,113 @@ public class UAVManager {
      * @return 处理完成的任务总数
      */
     public int processTasks(double timeSlot) {
-        int completedTaskCount = 0;
+        int newCompletedTaskCount = 0;
+        
+        // 生成随机任务以便模拟可以产生有意义的输出
+        generateRandomTasks();
         
         for (UAV uav : uavList) {
-            List<UAV.Task> completedTasks = uav.processTasks(timeSlot);
-            completedTaskCount += completedTasks.size();
+            List<UAV.Task> newCompletedTasks = uav.processTasks(timeSlot);
+            newCompletedTaskCount += newCompletedTasks.size();
+            
+            // 处理完成的任务
+            for (UAV.Task task : newCompletedTasks) {
+                handleUAVTaskCompletedEvent(task);
+            }
         }
         
-        return completedTaskCount;
+        // 记录并返回新完成的任务数量
+        if (newCompletedTaskCount > 0) {
+            SimLogger.printLine("处理UAV任务，完成数量: " + getCompletedTaskCount() + 
+                               ", 时间: " + simManager.getSimulationTime());
+        }
+        
+        return newCompletedTaskCount;
+    }
+    
+    /**
+     * 生成随机任务，分配给UAV处理
+     */
+    private void generateRandomTasks() {
+        // 每次调用有10%的概率生成新任务
+        if (random.nextDouble() < 0.1) {
+            // 随机选择一个UAV
+            int uavId = random.nextInt(uavList.size());
+            UAV uav = uavList.get(uavId);
+            
+            // 生成任务
+            String taskId = "Task_" + System.currentTimeMillis() + "_" + random.nextInt(1000);
+            double totalMI = 1000 + random.nextDouble() * 4000; // 1000-5000 MI的任务
+            
+            UAV.Task task = new UAV.Task(taskId, totalMI);
+            
+            // 分配任务给UAV
+            boolean assigned = uav.addTask(task);
+            
+            if (assigned) {
+                SimLogger.printLine("生成新任务 " + taskId + " 分配给 UAV " + uavId + 
+                               "，任务工作量：" + totalMI + " MI");
+            } else {
+                SimLogger.printLine("UAV " + uavId + " 任务队列已满，无法分配新任务");
+            }
+        }
+    }
+    
+    /**
+     * 处理UAV任务完成事件
+     */
+    public void handleUAVTaskCompletedEvent(UAV.Task task) {
+        if (task == null) {
+            SimLogger.printLine("[WARNING] 收到空任务完成事件");
+            return;
+        }
+        
+        // 确保计数器初始化
+        if (completedTasks == null) {
+            completedTasks = new AtomicInteger(0);
+            SimLogger.printLine("[INFO] 初始化completedTasks计数器");
+        }
+        
+        // 更新计数
+        int newCount = completedTasks.incrementAndGet();
+        
+        // 记录详细日志
+        SimLogger.printLine("[TASK_COMPLETED] 任务 #" + task.getId() + 
+                        " 完成时间: " + task.getCompletionTime() + 
+                        ", 当前仿真时间: " + (long)(simManager.getSimulationTime() * 1000) + 
+                        ", 总完成数: " + newCount);
+        
+        // 记录到日志文件
+        double simCurrentTime = simManager.getSimulationTime();
+        double taskArrivalTime = task.getArrivalTime() / 1000.0; // 毫秒转秒
+        double taskCompletionTime = task.getCompletionTime() / 1000.0; // 毫秒转秒
+        
+        // 记录任务完成
+        SimLogger.getInstance().taskCompleted(
+            task.getId(), 
+            taskArrivalTime, 
+            taskCompletionTime, 
+            task.getTotalMI()
+        );
+        
+        // 通知相关组件
+        try {
+            TaskOffloadingEngine engine = (TaskOffloadingEngine)simManager.getTaskOffloadingEngine();
+            if (engine != null) {
+                engine.taskCompleted(task);
+            } else {
+                SimLogger.printLine("[WARNING] TaskOffloadingEngine为空，无法通知任务完成");
+            }
+        } catch (Exception e) {
+            SimLogger.printLine("[ERROR] 处理任务完成事件时出错: " + e.getMessage());
+            e.printStackTrace();
+        }
+        
+        // 定期记录 - 防止过多日志
+        if (newCount % 10 == 0 || newCount < 20) {
+            SimLogger.printLine("处理UAV任务，完成数量: " + newCount + 
+                            ", 时间: " + simManager.getSimulationTime());
+        }
     }
     
     /**
@@ -263,5 +371,31 @@ public class UAVManager {
             return false;
         }
         return uav.addTask(task);
+    }
+    
+    /**
+     * 获取完成的任务数量
+     */
+    public int getCompletedTaskCount() {
+        return completedTasks.get();
+    }
+    
+    /**
+     * 重置UAV状态 - 用于恢复卡死
+     */
+    public void resetUAVs() {
+        SimLogger.printLine("执行UAV紧急重置");
+        SimSettings simSettings = simManager.getSimulationSettings();
+        
+        for (UAV uav : uavList) {
+            // 清空任务队列
+            uav.clearTaskQueue();
+            
+            // 恢复一定的能量
+            double maxEnergy = simSettings.getUAVMaxEnergy();
+            uav.setEnergy(maxEnergy * 0.5); // 恢复到50%能量
+            
+            SimLogger.printLine("重置UAV #" + uav.getId() + " 成功");
+        }
     }
 }

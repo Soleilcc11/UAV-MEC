@@ -27,8 +27,8 @@
 		 taskType=_taskType;
 		 pesNumber = _pesNumber;
 		 length = _length;
-		 outputFileSize = _inputFileSize;
-		 inputFileSize = _outputFileSize;
+		 outputFileSize = _outputFileSize;
+		 inputFileSize = _inputFileSize;
 	 }
  
 	 public TaskProperty(int _mobileDeviceId, int _taskType, double _startTime, ExponentialDistribution[][] expRngList) {

@@ -3,7 +3,14 @@ package edu.boun.edgecloudsim.uav;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
+
+import org.cloudbus.cloudsim.core.SimEvent;
+
 import java.util.LinkedList;
+import edu.boun.edgecloudsim.core.SimManager;
+import edu.boun.edgecloudsim.core.SimSettings;
+import edu.boun.edgecloudsim.utils.SimLogger;
+
 
 /**
  * UAV类，代表一个无人机实体
@@ -16,6 +23,9 @@ public class UAV {
     private Queue<Task> taskQueue;
     private double speed;
     private UAVState state;
+    
+    // 添加处理任务的能量消耗常量
+    private static final double PROCESSING_ENERGY_PER_MI = 0.001; // 每MI消耗的能量
     
     /**
      * UAV状态枚举
@@ -122,49 +132,115 @@ public class UAV {
      * @param timeSlot 时间片
      * @return 处理完成的任务列表
      */
-    public List<Task> processTasks(double timeSlot) {
+    /**
+     * 处理队列中的任务 - 简化版，不依赖事件系统
+     * @param time 时间片
+     * @return 处理完成的任务列表
+     */
+    public List<Task> processTasks(double time) {
         List<Task> completedTasks = new ArrayList<>();
         
-        if (energy <= 0 || taskQueue.isEmpty()) {
+        // 添加防护检查
+        if (time <= 0) {
+            SimLogger.printLine("[WARNING] UAV " + id + " 收到无效时间值: " + time);
             return completedTasks;
         }
         
-        // 处理任务逻辑
-        double availableMIPS = processingCapacity * timeSlot;
-        double usedMIPS = 0;
+        if (taskQueue.isEmpty()) {
+            return completedTasks;
+        }
         
+        // 详细记录处理状态
+        SimLogger.printLine("UAV " + id + " 处理前状态: 能量=" + energy + 
+                        ", 处理能力=" + processingCapacity + " MIPS" + 
+                        ", 队列大小=" + taskQueue.size());
+        
+        double usedMIPS = 0;
+        double availableMIPS = processingCapacity * time;
+        double processingEnergyConsumption = 0;
+        
+        // 处理队列中的任务
         while (!taskQueue.isEmpty() && usedMIPS < availableMIPS) {
             Task currentTask = taskQueue.peek();
-            double remainingMI = currentTask.getRemainingMI();
             
+            if (currentTask == null) {
+                SimLogger.printLine("[WARNING] UAV " + id + " 队列中存在空任务，跳过处理");
+                taskQueue.poll();
+                continue;
+            }
+            
+            double remainingMI = currentTask.getRemainingMI();
+            SimLogger.printLine("UAV " + id + " 正在处理任务 #" + currentTask.getId() + 
+                            ", 剩余MI: " + remainingMI + 
+                            ", 可用MIPS: " + (availableMIPS - usedMIPS));
+            
+            // 检查是否可以完成任务
             if (remainingMI <= (availableMIPS - usedMIPS)) {
-                // 任务可以在当前时间片完成
-                taskQueue.poll(); // 从队列移除
+                // 可以完成任务
                 usedMIPS += remainingMI;
-                currentTask.setRemainingMI(0);
-                currentTask.setCompletionTime(System.currentTimeMillis());
-                completedTasks.add(currentTask);
+                
+                // 计算能量消耗
+                double taskEnergyConsumption = remainingMI * PROCESSING_ENERGY_PER_MI;
+                processingEnergyConsumption += taskEnergyConsumption;
+                
+                // 从队列中移除任务
+                Task task = taskQueue.poll();
+                
+                // 设置完成时间
+                double currentSimTime = SimManager.getInstance().getSimulationTime();
+                long completionTimeMs = (long)(currentSimTime * 1000);
+                task.setCompletionTime(completionTimeMs);
+                
+                // 确保任务已完成
+                task.setRemainingMI(0);
+                
+                // 添加到完成列表
+                completedTasks.add(task);
+                
+                SimLogger.printLine("UAV " + id + " 完成任务 #" + task.getId() + 
+                                ", 仿真时间: " + currentSimTime);
             } else {
-                // 任务部分完成
+                // 无法完成任务，部分处理
                 double processedMI = availableMIPS - usedMIPS;
-                currentTask.setRemainingMI(remainingMI - processedMI);
+                double newRemainingMI = remainingMI - processedMI;
+                
+                // 计算能量消耗
+                double taskEnergyConsumption = processedMI * PROCESSING_ENERGY_PER_MI;
+                processingEnergyConsumption += taskEnergyConsumption;
+                
+                // 更新剩余MI
+                currentTask.setRemainingMI(newRemainingMI);
                 usedMIPS = availableMIPS;
+                
+                SimLogger.printLine("UAV " + id + " 部分处理任务 #" + currentTask.getId() + 
+                                ", 原剩余MI: " + remainingMI + 
+                                ", 处理了: " + processedMI + 
+                                ", 新剩余MI: " + newRemainingMI);
             }
         }
         
-        // 更新状态
-        if (taskQueue.isEmpty()) {
-            state = UAVState.HOVERING;
-        } else {
-            state = UAVState.PROCESSING;
-        }
+        // 更新能量消耗
+        energy -= processingEnergyConsumption;
+        if (energy < 0) energy = 0;
         
-        // 消耗处理能量
-        double processingEnergyConsumption = usedMIPS * 0.001; // 假设每MIPS消耗0.001单位能量
-        energy = Math.max(0, energy - processingEnergyConsumption);
+        // 记录处理后状态
+        SimLogger.printLine("UAV " + id + " 处理后状态: 能量=" + energy + 
+                        ", 处理消耗=" + processingEnergyConsumption + 
+                        ", 剩余队列=" + taskQueue.size() + 
+                        ", 完成任务数: " + completedTasks.size());
         
         return completedTasks;
     }
+
+    /**
+     * 清空任务队列 - 用于处理卡死情况
+     */
+    public void clearTaskQueue() {
+        int originalSize = taskQueue.size();
+        taskQueue.clear();
+        SimLogger.printLine("UAV " + id + " 已清空任务队列，原队列大小: " + originalSize);
+    }
+
     /**
      * 获取可用计算能力
      * @return 可用计算能力 (MIPS)
@@ -180,7 +256,7 @@ public class UAV {
      */
     private double getCurrentUsage() {
         // 实现计算当前使用的计算能力
-        return 0.0; // 示例返回值
+        return taskQueue.size() > 0 ? processingCapacity * 0.5 : 0.0; // 简化计算，一旦有任务，使用50%能力
     }
     
     /**
@@ -202,6 +278,13 @@ public class UAV {
      */
     public double getEnergy() {
         return energy;
+    }
+    
+    /**
+     * 设置能量水平 - 用于恢复
+     */
+    public void setEnergy(double energy) {
+        this.energy = energy;
     }
     
     /**
@@ -250,6 +333,13 @@ public class UAV {
         private double remainingMI;
         private long arrivalTime;
         private long completionTime;
+        private int status;
+        
+        // 任务状态常量
+        public static final int CREATED_STATUS = 0;
+        public static final int PROCESSING_STATUS = 1;
+        public static final int COMPLETED_STATUS = 2;
+        public static final int CANCELED_STATUS = 3;
         
         public Task(String id, double totalMI) {
             this.id = id;
@@ -257,6 +347,7 @@ public class UAV {
             this.remainingMI = totalMI;
             this.arrivalTime = System.currentTimeMillis();
             this.completionTime = -1;
+            this.status = CREATED_STATUS;
         }
         
         public String getId() {
@@ -273,22 +364,48 @@ public class UAV {
         
         public void setRemainingMI(double remainingMI) {
             this.remainingMI = remainingMI;
+            if (remainingMI <= 0) {
+                this.status = COMPLETED_STATUS;
+            } else {
+                this.status = PROCESSING_STATUS;
+            }
         }
         
+        /**
+         * 获取任务到达时间
+         * @return 任务到达时间（毫秒）
+         */
         public long getArrivalTime() {
             return arrivalTime;
         }
         
+        /**
+         * 获取任务完成时间
+         * @return 任务完成时间（毫秒）
+         */
         public long getCompletionTime() {
             return completionTime;
         }
         
+        /**
+         * 设置任务完成时间
+         * @param completionTime 任务完成时间（毫秒）
+         */
         public void setCompletionTime(long completionTime) {
             this.completionTime = completionTime;
+            this.status = COMPLETED_STATUS;
         }
         
         public boolean isCompleted() {
-            return remainingMI <= 0;
+            return remainingMI <= 0 || status == COMPLETED_STATUS;
+        }
+        
+        public int getStatus() {
+            return status;
+        }
+        
+        public void setStatus(int status) {
+            this.status = status;
         }
     }
 }

@@ -361,4 +361,53 @@ public class SimSettings {
     public double getGsmPropagationDelay() {
         return Double.parseDouble(configFile.getProperty("gsm_propagation_delay", "0.5"));
     }
+
+    /**
+     * 在没有配置文件的情况下初始化默认设置
+     * @param numOfMobileDevices 移动设备数量
+     */
+    public void initializeDefaultSettings(int numOfMobileDevices) {
+        // 创建并设置默认配置
+        this.configFile = new Properties();
+        
+        // 添加默认配置参数
+        configFile.setProperty("min_number_of_mobile_devices", "1");
+        configFile.setProperty("max_number_of_mobile_devices", String.valueOf(numOfMobileDevices));
+        configFile.setProperty("simulation_time", "2"); // 缩短模拟时间为2分钟
+        configFile.setProperty("warm_up_period", "0.5"); // 缩短预热时间为0.5分钟
+        configFile.setProperty("vm_load_log_interval", "0.1");
+        configFile.setProperty("location_log_interval", "0.1");
+        configFile.setProperty("ap_delay_log_interval", "0.1");
+        configFile.setProperty("file_logging_enabled", "true");
+        configFile.setProperty("deep_file_logging_enabled", "true");
+        
+        // 设置UAV参数
+        configFile.setProperty("uav_count", String.valueOf(numOfMobileDevices / 10 + 1));
+        configFile.setProperty("uav_initial_height", "100");
+        configFile.setProperty("uav_min_height", "50");
+        configFile.setProperty("uav_max_height", "200");
+        configFile.setProperty("uav_max_energy", "10000");
+        configFile.setProperty("uav_flight_power", "50");
+        configFile.setProperty("uav_hover_power", "20");
+        
+        // 创建空的XML文档以避免空指针异常
+        try {
+            DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+            DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
+            
+            // 创建基本的边缘设备文档
+            String edgeDevicesXml = "<?xml version=\"1.0\"?><edge_devices><datacenter><costPerBw>0</costPerBw><costPerSec>3</costPerSec><costPerMem>0.05</costPerMem><costPerStorage>0.1</costPerStorage><location><x_pos>1000</x_pos><y_pos>1000</y_pos><z_pos>0</z_pos></location><hosts><host><core>16</core><mips>20000</mips><ram>32000</ram><storage>1000000</storage></host></hosts></datacenter></edge_devices>";
+            edgeDevicesDoc = dBuilder.parse(new java.io.ByteArrayInputStream(edgeDevicesXml.getBytes()));
+            
+            // 创建基本的应用程序文档
+            String applicationsXml = "<?xml version=\"1.0\"?><applications><application><usage_percentage>100</usage_percentage><prob_cloud_selection>0.1</prob_cloud_selection><poisson_interarrival>5</poisson_interarrival><task_length>10000</task_length><required_core>1</required_core><vm_utilization_on_edge>20</vm_utilization_on_edge><vm_utilization_on_cloud>2</vm_utilization_on_cloud><vm_utilization_on_mobile>50</vm_utilization_on_mobile><delay_sensitivity>0.8</delay_sensitivity></application></applications>";
+            applicationsDoc = dBuilder.parse(new java.io.ByteArrayInputStream(applicationsXml.getBytes()));
+            
+            edgeDevicesDoc.getDocumentElement().normalize();
+            applicationsDoc.getDocumentElement().normalize();
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.exit(1);
+        }
+    }
 }

@@ -28,6 +28,9 @@ class EdgeCloudSimIntegrationTest {
 
         assertEquals(1, manager.getEdgeServerManager().getDatacenterList().size());
         assertEquals(1, manager.getEdgeServerManager().getVmList(0).size());
-        assertFalse(manager.getMobileDeviceManager().getCloudletReceivedList().isEmpty());
+        assertEquals(manager.getScheduledEdgeTaskCount(), manager.getSubmittedEdgeTaskCount(),
+                "Every scheduled workload task must reach SimManager");
+        assertFalse(manager.getMobileDeviceManager().getCloudletReceivedList().isEmpty(),
+                "At least one workload task must complete through an EdgeCloudSim VM");
     }
 }

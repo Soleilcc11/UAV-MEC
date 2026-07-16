@@ -53,6 +53,8 @@ public class SimManager extends SimEntity {
     private String simScenario;
     private String orchestratorPolicy;
     private boolean componentsInitialized;
+    private int scheduledEdgeTaskCount;
+    private int submittedEdgeTaskCount;
 
     private SimManager() {
         super("SimManager");
@@ -87,6 +89,8 @@ public class SimManager extends SimEntity {
         this.simScenario = simScenario;
         this.orchestratorPolicy = orchestratorPolicy;
         this.simSettings = SimSettings.getInstance();
+        this.scheduledEdgeTaskCount = 0;
+        this.submittedEdgeTaskCount = 0;
 
         try {
             loadGeneratorModel = scenarioFactory.getLoadGeneratorModel();
@@ -149,6 +153,7 @@ public class SimManager extends SimEntity {
         switch (event.getTag()) {
             case SUBMIT_EDGE_TASK:
                 if (mobileDeviceManager != null && event.getData() instanceof TaskProperty) {
+                    submittedEdgeTaskCount++;
                     mobileDeviceManager.submitTask((TaskProperty) event.getData());
                 }
                 break;
@@ -192,6 +197,7 @@ public class SimManager extends SimEntity {
 
         for (TaskProperty task : loadGeneratorModel.getTaskList()) {
             schedule(getId(), Math.max(0.0, task.getStartTime()), SUBMIT_EDGE_TASK, task);
+            scheduledEdgeTaskCount++;
         }
         for (TaskProperty task : pendingUavTasks) {
             schedule(getId(), Math.max(0.0, task.getStartTime()), SUBMIT_UAV_TASK, task);
@@ -231,6 +237,8 @@ public class SimManager extends SimEntity {
     public String getSimulationScenario() { return simScenario; }
     public int getNumOfMobileDevice() { return numOfMobileDevice; }
     public double getSimulationTime() { return CloudSim.clock(); }
+    public int getScheduledEdgeTaskCount() { return scheduledEdgeTaskCount; }
+    public int getSubmittedEdgeTaskCount() { return submittedEdgeTaskCount; }
 
     public void setUAVManager(UAVManager uavManager) { this.uavManager = uavManager; }
     public void setTaskOffloadingEngine(TaskOffloadingEngine engine) { this.taskOffloadingEngine = engine; }

@@ -80,9 +80,15 @@ public class IdleActiveLoadGenerator extends LoadGeneratorModel {
                     SimLogger.printLine("生成任务间隔时间错误！间隔时间为 " + interval + "，设备 " + i + "，时间 " + virtualTime);
                     continue;
                 }
-                
+
                 virtualTime += interval;
-                
+
+                // The sample is a delay from the previous arrival. Do not enqueue
+                // an arrival that falls outside the configured simulation window.
+                if (virtualTime >= simulationTime) {
+                    break;
+                }
+
                 // 检查是否超出活动期
                 if(virtualTime > activePeriodStartTime + activePeriod){
                     activePeriodStartTime = activePeriodStartTime + activePeriod + idlePeriod;

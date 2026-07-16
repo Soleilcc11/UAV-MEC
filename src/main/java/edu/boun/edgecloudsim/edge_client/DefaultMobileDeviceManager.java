@@ -69,7 +69,16 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 	protected void processCloudletReturn(SimEvent ev) {
 		NetworkModel networkModel = SimManager.getInstance().getNetworkModel();
 		Task task = (Task) ev.getData();
-		
+
+		// This class submits cloudlets after the modeled upload delay instead of
+		// using DatacenterBroker.submitCloudlets(). Keep the broker bookkeeping
+		// consistent when the datacenter returns a completed task.
+		getCloudletReceivedList().add(task);
+		getCloudletSubmittedList().remove(task);
+		if (cloudletsSubmitted > 0) {
+			cloudletsSubmitted--;
+		}
+
 		SimLogger.getInstance().taskExecuted(task.getCloudletId());
 
 		if(task.getAssociatedDatacenterId() == SimSettings.CLOUD_DATACENTER_ID){
@@ -254,9 +263,11 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 			//set related vm id
 			task.setAssociatedVmId(selectedVM.getId());
 			
-			//bind task to related VM
-			getCloudletList().add(task);
-			bindCloudletToVm(task.getCloudletId(),selectedVM.getId());
+			// Track the manually delayed submission in the same collections used by
+			// DatacenterBroker's normal submitCloudlets() path.
+			task.setVmId(selectedVM.getId());
+			getCloudletSubmittedList().add(task);
+			cloudletsSubmitted++;
 			
 			//SimLogger.printLine(CloudSim.clock() + ": Cloudlet#" + task.getCloudletId() + " is submitted to VM#" + task.getVmId());
 			schedule(getVmsToDatacentersMap().get(task.getVmId()), delay, CloudSimTags.CLOUDLET_SUBMIT, task);

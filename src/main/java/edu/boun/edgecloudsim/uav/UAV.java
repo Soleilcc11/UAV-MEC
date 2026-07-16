@@ -5,9 +5,9 @@ import java.util.List;
 import java.util.Queue;
 
 import org.cloudbus.cloudsim.core.SimEvent;
+import org.cloudbus.cloudsim.core.CloudSim;
 
 import java.util.LinkedList;
-import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.SimLogger;
 
@@ -187,7 +187,7 @@ public class UAV {
                 Task task = taskQueue.poll();
                 
                 // 设置完成时间
-                double currentSimTime = SimManager.getInstance().getSimulationTime();
+                double currentSimTime = CloudSim.clock();
                 long completionTimeMs = (long)(currentSimTime * 1000);
                 task.setCompletionTime(completionTimeMs);
                 
@@ -342,10 +342,14 @@ public class UAV {
         public static final int CANCELED_STATUS = 3;
         
         public Task(String id, double totalMI) {
+            this(id, totalMI, (long) (CloudSim.clock() * 1000));
+        }
+
+        Task(String id, double totalMI, long arrivalTime) {
             this.id = id;
             this.totalMI = totalMI;
             this.remainingMI = totalMI;
-            this.arrivalTime = System.currentTimeMillis();
+            this.arrivalTime = arrivalTime;
             this.completionTime = -1;
             this.status = CREATED_STATUS;
         }

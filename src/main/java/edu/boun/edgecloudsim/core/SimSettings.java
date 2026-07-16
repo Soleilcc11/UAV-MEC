@@ -4,6 +4,9 @@ import java.util.Properties;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.File;
@@ -23,6 +26,8 @@ public class SimSettings {
     private UAVMECScenarioFactory scenarioFactory;
     private Document edgeDevicesDoc = null;
     private Document applicationsDoc = null;
+    private double[][] taskLookUpTable = new double[0][0];
+    private String[] taskNames = new String[0];
     
     // 添加分隔符常量
     public static final String DELIMITER = ",";
@@ -35,15 +40,19 @@ public class SimSettings {
     // 添加客户端活动时间常量
     public static final double CLIENT_ACTIVITY_START_TIME = 10;
     
-    public int getNumOfEdgeVMs() { return 10; }
+    public int getNumOfEdgeVMs() {
+        return edgeDevicesDoc == null ? 0 : edgeDevicesDoc.getElementsByTagName("VM").getLength();
+    }
     public int getNumOfCloudVMs() { return 5; }
-    public int getNumOfEdgeHosts() { return 5; }
+    public int getNumOfEdgeHosts() {
+        return edgeDevicesDoc == null ? 0 : edgeDevicesDoc.getElementsByTagName("host").getLength();
+    }
     public int getNumOfCloudHost() { return 2; }
     public int getCoreForMobileVM() { return 4; }
     public int getMipsForMobileVM() { return 1000; }
     public int getRamForMobileVM() { return 1024; }
     public int getStorageForMobileVM() { return 10000; }
-    public Object getTaskLookUpTable() { return new Object(); }
+    public double[][] getTaskLookUpTable() { return taskLookUpTable; }
     
     // 网络相关方法
     public double getInternalLanDelay() { return 0.1; }
@@ -75,7 +84,7 @@ public class SimSettings {
 
     // 添加任务相关方法
     public String getTaskName(int taskType) {
-        return configFile.getProperty("task_" + taskType + "_name", "default_task");
+        return taskType >= 0 && taskType < taskNames.length ? taskNames[taskType] : "default_task";
     }
 
     public Object getTaskProperties(String taskName) {
@@ -146,22 +155,101 @@ public class SimSettings {
     public void initialize(String configFile, String edgeDevicesFile, String applicationsFile) {
         this.configFile = new Properties();
         try {
-            this.configFile.load(new FileInputStream(configFile));
-            
-            // 加载边缘设备和应用程序XML文件
             DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
             DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
+
+            if (configFile.toLowerCase().endsWith(".xml")) {
+                Document settingsDoc = dBuilder.parse(new File(configFile));
+                settingsDoc.getDocumentElement().normalize();
+                parseSimulationSettings(settingsDoc);
+            } else {
+                this.configFile.load(new FileInputStream(configFile));
+            }
             
             edgeDevicesDoc = dBuilder.parse(new File(edgeDevicesFile));
             applicationsDoc = dBuilder.parse(new File(applicationsFile));
             
             edgeDevicesDoc.getDocumentElement().normalize();
             applicationsDoc.getDocumentElement().normalize();
+            parseApplications(applicationsDoc);
             
         } catch (Exception e) {
-            e.printStackTrace();
-            System.exit(1);
+            throw new IllegalStateException("Cannot initialize simulation settings", e);
         }
+    }
+
+    private void parseSimulationSettings(Document settingsDoc) {
+        copyTag(settingsDoc, "simulation_time", "simulation_time");
+        copyTag(settingsDoc, "warm_up_period", "warm_up_period");
+        copyTag(settingsDoc, "vm_load_check_interval", "vm_load_log_interval");
+        copyTag(settingsDoc, "location_check_interval", "location_log_interval");
+        copyTag(settingsDoc, "file_log_enabled", "file_logging_enabled");
+        copyTag(settingsDoc, "deep_file_log_enabled", "deep_file_logging_enabled");
+        copyTag(settingsDoc, "num_of_uavs", "num_of_uavs");
+        copyTag(settingsDoc, "uav_max_energy", "uav_max_energy");
+        copyTag(settingsDoc, "uav_initial_height", "uav_initial_height");
+
+        NodeList spaces = settingsDoc.getElementsByTagName("simulation_space");
+        if (spaces.getLength() > 0) {
+            Element space = (Element) spaces.item(0);
+            copyChild(space, "x", "simulation_space_x");
+            copyChild(space, "y", "simulation_space_y");
+            copyChild(space, "z", "simulation_space_z");
+        }
+
+        String scenario = isEnabled(settingsDoc, "single_tier") ? "SINGLE_TIER"
+                : isEnabled(settingsDoc, "two_tier_with_EO") ? "TWO_TIER_WITH_EO" : "TWO_TIER";
+        this.configFile.setProperty("simulation_scenarios", scenario);
+        this.configFile.setProperty("orchestrator_policies",
+                isEnabled(settingsDoc, "ddpg") ? "DDPG" : "RANDOM_FIT");
+    }
+
+    private void parseApplications(Document document) {
+        NodeList applications = document.getElementsByTagName("application");
+        taskLookUpTable = new double[applications.getLength()][14];
+        taskNames = new String[applications.getLength()];
+        String[] fields = {
+            "usage_percentage", "prob_cloud_selection", "poisson_interarrival",
+            "active_period", "idle_period", "data_upload", "data_download",
+            "task_length", "required_core", "vm_utilization_on_edge",
+            "vm_utilization_on_cloud", "vm_utilization_on_mobile",
+            "delay_sensitivity", "max_delay_requirement"
+        };
+
+        for (int i = 0; i < applications.getLength(); i++) {
+            Element application = (Element) applications.item(i);
+            taskNames[i] = application.getAttribute("name");
+            for (int j = 0; j < fields.length; j++) {
+                taskLookUpTable[i][j] = getChildDouble(application, fields[j], 0.0);
+            }
+        }
+    }
+
+    private void copyTag(Document document, String tag, String property) {
+        NodeList nodes = document.getElementsByTagName(tag);
+        if (nodes.getLength() > 0) {
+            configFile.setProperty(property, nodes.item(0).getTextContent().trim());
+        }
+    }
+
+    private void copyChild(Element parent, String tag, String property) {
+        NodeList nodes = parent.getElementsByTagName(tag);
+        if (nodes.getLength() > 0) {
+            configFile.setProperty(property, nodes.item(0).getTextContent().trim());
+        }
+    }
+
+    private boolean isEnabled(Document document, String tag) {
+        NodeList nodes = document.getElementsByTagName(tag);
+        return nodes.getLength() > 0 && Boolean.parseBoolean(nodes.item(0).getTextContent().trim());
+    }
+
+    private double getChildDouble(Element parent, String tag, double defaultValue) {
+        NodeList nodes = parent.getElementsByTagName(tag);
+        if (nodes.getLength() == 0) {
+            return defaultValue;
+        }
+        return Double.parseDouble(nodes.item(0).getTextContent().trim());
     }
     
     /**
@@ -382,7 +470,7 @@ public class SimSettings {
         configFile.setProperty("deep_file_logging_enabled", "true");
         
         // 设置UAV参数
-        configFile.setProperty("uav_count", String.valueOf(numOfMobileDevices / 10 + 1));
+        configFile.setProperty("num_of_uavs", String.valueOf(numOfMobileDevices / 10 + 1));
         configFile.setProperty("uav_initial_height", "100");
         configFile.setProperty("uav_min_height", "50");
         configFile.setProperty("uav_max_height", "200");
@@ -405,6 +493,7 @@ public class SimSettings {
             
             edgeDevicesDoc.getDocumentElement().normalize();
             applicationsDoc.getDocumentElement().normalize();
+            parseApplications(applicationsDoc);
         } catch (Exception e) {
             e.printStackTrace();
             System.exit(1);

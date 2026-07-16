@@ -42,6 +42,9 @@ public class UAVManager {
      * 初始化UAV管理器
      */
     public void initialize() {
+        if (!uavList.isEmpty()) {
+            return;
+        }
         SimSettings simSettings = simManager.getSimulationSettings();
         int numUavs = simSettings.getNumOfUAVs();
         
@@ -123,9 +126,6 @@ public class UAVManager {
     public int processTasks(double timeSlot) {
         int newCompletedTaskCount = 0;
         
-        // 生成随机任务以便模拟可以产生有意义的输出
-        generateRandomTasks();
-        
         for (UAV uav : uavList) {
             List<UAV.Task> newCompletedTasks = uav.processTasks(timeSlot);
             newCompletedTaskCount += newCompletedTasks.size();
@@ -143,34 +143,6 @@ public class UAVManager {
         }
         
         return newCompletedTaskCount;
-    }
-    
-    /**
-     * 生成随机任务，分配给UAV处理
-     */
-    private void generateRandomTasks() {
-        // 每次调用有10%的概率生成新任务
-        if (random.nextDouble() < 0.1) {
-            // 随机选择一个UAV
-            int uavId = random.nextInt(uavList.size());
-            UAV uav = uavList.get(uavId);
-            
-            // 生成任务
-            String taskId = "Task_" + System.currentTimeMillis() + "_" + random.nextInt(1000);
-            double totalMI = 1000 + random.nextDouble() * 4000; // 1000-5000 MI的任务
-            
-            UAV.Task task = new UAV.Task(taskId, totalMI);
-            
-            // 分配任务给UAV
-            boolean assigned = uav.addTask(task);
-            
-            if (assigned) {
-                SimLogger.printLine("生成新任务 " + taskId + " 分配给 UAV " + uavId + 
-                               "，任务工作量：" + totalMI + " MI");
-            } else {
-                SimLogger.printLine("UAV " + uavId + " 任务队列已满，无法分配新任务");
-            }
-        }
     }
     
     /**
@@ -196,19 +168,6 @@ public class UAVManager {
                         " 完成时间: " + task.getCompletionTime() + 
                         ", 当前仿真时间: " + (long)(simManager.getSimulationTime() * 1000) + 
                         ", 总完成数: " + newCount);
-        
-        // 记录到日志文件
-        double simCurrentTime = simManager.getSimulationTime();
-        double taskArrivalTime = task.getArrivalTime() / 1000.0; // 毫秒转秒
-        double taskCompletionTime = task.getCompletionTime() / 1000.0; // 毫秒转秒
-        
-        // 记录任务完成
-        SimLogger.getInstance().taskCompleted(
-            task.getId(), 
-            taskArrivalTime, 
-            taskCompletionTime, 
-            task.getTotalMI()
-        );
         
         // 通知相关组件
         try {

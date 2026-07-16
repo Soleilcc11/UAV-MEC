@@ -62,6 +62,7 @@ public class TaskOffloadingEngine {
                 SimLogger.printLine("成功连接到RL服务器");
             } else {
                 SimLogger.printLine("无法连接到RL服务器，将使用默认策略");
+                pythonInterface.shutdown();
                 this.pythonInterface = null;
             }
         } catch (Exception e) {
@@ -84,12 +85,6 @@ public class TaskOffloadingEngine {
      * @return 卸载决策（目标UAV的ID）
      */
     public int getOffloadingDecision(UAV.Task task) {
-        // 确保已初始化
-        if (totalTaskCount == null) {
-            totalTaskCount = new AtomicInteger(0);
-        }
-        totalTaskCount.incrementAndGet();
-        
         // 确保状态动作管理器已初始化
         if (stateActionManager == null) {
             SimLogger.printLine("警告: StateActionManager未初始化，使用默认决策");
@@ -245,13 +240,6 @@ public class TaskOffloadingEngine {
             }
             activeTasks.put(task.getId(), task);
             
-            // 记录任务提交信息到日志
-            try {
-                SimLogger.getInstance().taskStarted(taskId, CloudSim.clock());
-                // 设置其他任务属性
-            } catch (Exception e) {
-                SimLogger.printLine("记录任务信息时出错: " + e.getMessage());
-            }
         } else {
             SimLogger.printLine("任务 " + taskId + " 分配失败");
             if (rejectedTaskCount == null) {
@@ -274,11 +262,9 @@ public class TaskOffloadingEngine {
             completedTasks = new AtomicInteger(0);
         }
         
-        // 确保任务被跟踪
         String taskId = task.getId();
         if (!activeTasks.containsKey(taskId)) {
-            SimLogger.printLine("[WARNING] 任务 #" + taskId + " 不在活动任务列表中，添加它");
-            activeTasks.put(taskId, task);
+            SimLogger.printLine("[INFO] 完成未由卸载引擎提交的任务 #" + taskId);
         }
         
         // 从活动任务中移除
@@ -289,34 +275,21 @@ public class TaskOffloadingEngine {
         long arrivalTimeMs = task.getArrivalTime();
         long completionTimeMs = task.getCompletionTime();
         
-        // 防止时间戳错误
-        if (completionTimeMs <= 0) {
-            // 使用当前仿真时间作为完成时间
+        if (completionTimeMs < arrivalTimeMs) {
             completionTimeMs = (long)(SimManager.getInstance().getSimulationTime() * 1000);
-            task.setCompletionTime(completionTimeMs); 
+            task.setCompletionTime(completionTimeMs);
         }
         
         // 计算正确的延迟
-        long latency = (completionTimeMs > arrivalTimeMs) ? 
-                    (completionTimeMs - arrivalTimeMs) : 0;
+        long latency = completionTimeMs - arrivalTimeMs;
         
         // 更新总延迟
         totalLatency += latency;
         
-        // 解析任务信息
-        String taskIdStr = "SimTask_" + taskId;
-        double startTime = SimManager.getInstance().getSimulationTime();
-        double completionTime = startTime + 1.0; // 假设任务完成时间为当前时间+1秒
-        double taskLength = 1000.0; // 假设默认任务长度为1000MI
-        
-        // 记录调试信息
-        SimLogger.printLine("[完成] 任务 " + taskIdStr + " 完成，到达时间: " + startTime + "ms, 完成时间: " + completionTime + "ms, 延迟: " + 0 + "ms");
-        
-        // 记录任务完成
-        SimLogger.getInstance().taskCompleted(taskIdStr, startTime, completionTime, taskLength);
-        
-        // 更新统计信息
-        completedTasks.incrementAndGet();
+        double arrivalTimeSeconds = arrivalTimeMs / 1000.0;
+        double completionTimeSeconds = completionTimeMs / 1000.0;
+        SimLogger.getInstance().taskCompleted(
+            taskId, arrivalTimeSeconds, completionTimeSeconds, task.getTotalMI());
         
         // RL模型训练部分添加错误处理
         if (pythonInterface != null && pythonInterface.isConnected()) {

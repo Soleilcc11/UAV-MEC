@@ -12,8 +12,6 @@ import edu.boun.edgecloudsim.edge_client.Task;
  */
 public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
     
-    private TaskOffloadingEngine engine;
-    private UAVManager uavManager;
     private SimManager simManager;
     
     /**
@@ -22,16 +20,11 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
     public TaskOffloadingOrchestrator(String _policy, String _scenario) {
         super(_policy, _scenario);
         this.simManager = SimManager.getInstance();
-        this.uavManager = simManager.getUAVManager();
-        this.engine = new TaskOffloadingEngine(simManager);
     }
 
     @Override
     public void initialize() {
-        // 初始化已在TaskOffloadingEngine构造函数中完成
-        if (engine != null) {
-            engine.initialize();
-        }
+        // TaskOffloadingEngine is owned and initialized by SimManager.
     }
     
     /**
@@ -54,6 +47,10 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
         double[] location = getMobileDeviceLocation(mobileDeviceId);
         
         // 找到最近的UAV
+        UAVManager uavManager = simManager.getUAVManager();
+        if (uavManager == null) {
+            return TaskOffloadingEngine.CLOUD_EXECUTION;
+        }
         int nearestUavId = uavManager.findNearestUAV(location[0], location[1]);
         UAV nearestUAV = null;
         if (nearestUavId >= 0) {
@@ -155,7 +152,7 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
      * 获取内部的TaskOffloadingEngine实例
      */
     public TaskOffloadingEngine getEngine() {
-        return engine;
+        return simManager.getTaskOffloadingEngine();
     }
     
     @Override
@@ -165,10 +162,7 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
     
     @Override
     public void shutdownEntity() {
-        // 关闭实体
-        if (engine != null) {
-            engine.close();
-        }
+        // SimManager owns and closes the engine.
     }
     
     @Override

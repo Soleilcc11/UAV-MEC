@@ -14,6 +14,7 @@ import java.util.logging.*;
  * 修复版本 - 解决连接不稳定和训练请求阻塞问题
  */
 public class EnhancedPythonInterface {
+    private static boolean loggingConfigured = false;
     private Socket socket;
     private BufferedReader in;
     private PrintWriter out;
@@ -84,19 +85,19 @@ public class EnhancedPythonInterface {
         this.statistics = new ConcurrentHashMap<>();
         this.reconnectAttempts = 0;
         
-        // 设置日志
-        try {
-            FileHandler fileHandler = new FileHandler("enhanced_python_interface.log", true);
-            fileHandler.setFormatter(new SimpleFormatter());
-            this.logger.addHandler(fileHandler);
-            this.logger.setLevel(Level.INFO);
-            
-            // 添加控制台输出，便于调试
-            ConsoleHandler consoleHandler = new ConsoleHandler();
-            consoleHandler.setFormatter(new SimpleFormatter());
-            this.logger.addHandler(consoleHandler);
-        } catch (IOException e) {
-            System.err.println("无法设置日志文件: " + e.getMessage());
+        synchronized (EnhancedPythonInterface.class) {
+            if (!loggingConfigured) {
+                try {
+                    FileHandler fileHandler = new FileHandler("enhanced_python_interface.log", true);
+                    fileHandler.setFormatter(new SimpleFormatter());
+                    this.logger.addHandler(fileHandler);
+                    this.logger.setUseParentHandlers(true);
+                    this.logger.setLevel(Level.INFO);
+                    loggingConfigured = true;
+                } catch (IOException e) {
+                    System.err.println("无法设置日志文件: " + e.getMessage());
+                }
+            }
         }
         
         logger.info("初始化接口，使用固定状态维度=" + STATE_DIMENSION + ", 动作维度=" + ACTION_DIMENSION);

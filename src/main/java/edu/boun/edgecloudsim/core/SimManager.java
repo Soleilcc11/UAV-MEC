@@ -1,5 +1,11 @@
 package edu.boun.edgecloudsim.core;
 
+import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.List;
+
+import org.cloudbus.cloudsim.Vm;
 import org.cloudbus.cloudsim.core.CloudSim;
 import org.cloudbus.cloudsim.core.SimEntity;
 import org.cloudbus.cloudsim.core.SimEvent;
@@ -11,24 +17,30 @@ import edu.boun.edgecloudsim.edge_orchestrator.EdgeOrchestrator;
 import edu.boun.edgecloudsim.edge_server.EdgeServerManager;
 import edu.boun.edgecloudsim.mobility.MobilityModel;
 import edu.boun.edgecloudsim.network.NetworkModel;
-import edu.boun.edgecloudsim.uav.UAVManager;
+import edu.boun.edgecloudsim.task_generator.LoadGeneratorModel;
 import edu.boun.edgecloudsim.uav.PerformanceMonitor;
 import edu.boun.edgecloudsim.uav.TaskOffloadingEngine;
-import edu.boun.edgecloudsim.uav.PeriodicEvent;
+import edu.boun.edgecloudsim.uav.UAVMECScenarioFactory;
+import edu.boun.edgecloudsim.uav.UAVManager;
+import edu.boun.edgecloudsim.uav.GymDecisionCoordinator;
 import edu.boun.edgecloudsim.utils.SimLogger;
+import edu.boun.edgecloudsim.utils.TaskProperty;
+import edu.boun.edgecloudsim.utils.SimUtils;
 
-/**
- * 模拟管理器扩展，增加UAV管理器支持
- */
+/** Coordinates the EdgeCloudSim components and UAV extensions. */
 public class SimManager extends SimEntity {
-    private static SimManager instance = null;
+    private static SimManager instance;
+
+    public static final int BASE_EVENT_ID = 5000;
+    public static final int SUBMIT_EDGE_TASK = BASE_EVENT_ID + 1;
+    public static final int PROCESS_UAV_TASKS = BASE_EVENT_ID + 2;
+    public static final int SUBMIT_UAV_TASK = BASE_EVENT_ID + 3;
+    public static final int MOVE_UAV = BASE_EVENT_ID + 4;
+    private static final double TERMINATION_EPSILON = 1e-9;
+
     private SimSettings simSettings;
-    private UAVManager uavManager;
-    private TaskOffloadingEngine taskOffloadingEngine;
-    private PerformanceMonitor performanceMonitor;
-    
-    // 添加缺失的核心组件
     private ScenarioFactory scenarioFactory;
+    private LoadGeneratorModel loadGeneratorModel;
     private MobilityModel mobilityModel;
     private NetworkModel networkModel;
     private EdgeOrchestrator orchestrator;
@@ -36,92 +48,69 @@ public class SimManager extends SimEntity {
     private CloudServerManager cloudServerManager;
     private MobileServerManager mobileServerManager;
     private MobileDeviceManager mobileDeviceManager;
-    
-    // 模拟配置参数
+
+    private UAVManager uavManager;
+    private TaskOffloadingEngine taskOffloadingEngine;
+    private PerformanceMonitor performanceMonitor;
+    private final List<TaskProperty> pendingUavTasks = new ArrayList<>();
+    private final List<UavMovementCommand> pendingUavMovements = new ArrayList<>();
+    private final Deque<TaskProperty> pendingGymTasks = new ArrayDeque<>();
+
     private int numOfMobileDevice;
     private String simScenario;
     private String orchestratorPolicy;
-    
-    // 事件标识符常量
-    public static final int BASE_EVENT_ID = 5000;
-    public static final int PERIODIC_EVENT = BASE_EVENT_ID + 1;
-    public static final int PROCESS_UAV_TASKS = BASE_EVENT_ID + 2;
-    
-    /**
-     * 默认构造函数 - 私有化以实现单例模式
-     */
+    private boolean componentsInitialized;
+    private int scheduledEdgeTaskCount;
+    private int submittedEdgeTaskCount;
+    private GymDecisionCoordinator gymCoordinator;
+    private boolean nextGymTaskReady;
+
     private SimManager() {
         super("SimManager");
-        // 默认构造函数，不执行任何初始化
     }
-    
-    /**
-     * 新增构造函数 - 支持带参数的初始化
-     * 修复构造函数不匹配的问题
-     */
-    public SimManager(ScenarioFactory _scenarioFactory, int _numOfMobileDevice, 
-                     String _simScenario, String _orchestratorPolicy) {
+
+    public SimManager(ScenarioFactory scenarioFactory, int numOfMobileDevice,
+            String simScenario, String orchestratorPolicy) {
         super("SimManager");
-        scenarioFactory = _scenarioFactory;
-        numOfMobileDevice = _numOfMobileDevice;
-        simScenario = _simScenario;
-        orchestratorPolicy = _orchestratorPolicy;
-        
-        simSettings = SimSettings.getInstance();
-        
-        // 初始化核心组件
-        try {
-            mobilityModel = scenarioFactory.getMobilityModel();
-            networkModel = scenarioFactory.getNetworkModel();
-            orchestrator = scenarioFactory.getEdgeOrchestrator();
-            edgeServerManager = scenarioFactory.getEdgeServerManager();
-            cloudServerManager = scenarioFactory.getCloudServerManager();
-            mobileServerManager = scenarioFactory.getMobileServerManager();
-            mobileDeviceManager = scenarioFactory.getMobileDeviceManager();
-            
-            // 如果ScenarioFactory是UAVMECScenarioFactory，获取UAVManager
-            if (scenarioFactory instanceof edu.boun.edgecloudsim.uav.UAVMECScenarioFactory) {
-                uavManager = ((edu.boun.edgecloudsim.uav.UAVMECScenarioFactory) scenarioFactory).getUAVManager();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            System.exit(1);
-        }
-        
-        // 更新单例实例
         instance = this;
+        initialize(scenarioFactory, numOfMobileDevice, simScenario, orchestratorPolicy);
     }
-    
-    // 获取实例（单例模式）
-    public static SimManager getInstance(){
-        if(instance == null){
+
+    public static SimManager getInstance() {
+        if (instance == null) {
             instance = new SimManager();
         }
         return instance;
     }
-    
-    /**
-     * 初始化模拟管理器(使用单个配置对象)
-     */
+
+    public static synchronized void resetInstance() {
+        if (CloudSim.running()) {
+            throw new IllegalStateException("Cannot reset SimManager while CloudSim is running");
+        }
+        instance = null;
+    }
+
     public void initialize(Object config) {
-        // 初始化代码...
         simSettings = SimSettings.getInstance();
     }
-    
-    /**
-     * 初始化模拟管理器(使用多个参数 - 添加此方法满足API要求)
-     */
-    public void initialize(ScenarioFactory _scenarioFactory, int _numOfMobileDevice, 
-                           String _simScenario, String _orchestratorPolicy) {
-        scenarioFactory = _scenarioFactory;
-        numOfMobileDevice = _numOfMobileDevice;
-        simScenario = _simScenario;
-        orchestratorPolicy = _orchestratorPolicy;
-        
-        simSettings = SimSettings.getInstance();
-        
-        // 初始化核心组件
+
+    public synchronized void initialize(ScenarioFactory scenarioFactory, int numOfMobileDevice,
+            String simScenario, String orchestratorPolicy) {
+        if (componentsInitialized) {
+            return;
+        }
+
+        this.scenarioFactory = scenarioFactory;
+        this.numOfMobileDevice = numOfMobileDevice;
+        this.simScenario = simScenario;
+        this.orchestratorPolicy = orchestratorPolicy;
+        this.simSettings = SimSettings.getInstance();
+        this.scheduledEdgeTaskCount = 0;
+        this.submittedEdgeTaskCount = 0;
+
         try {
+            SimUtils.setSeed(simSettings.getSimulationSeed());
+            loadGeneratorModel = scenarioFactory.getLoadGeneratorModel();
             mobilityModel = scenarioFactory.getMobilityModel();
             networkModel = scenarioFactory.getNetworkModel();
             orchestrator = scenarioFactory.getEdgeOrchestrator();
@@ -129,218 +118,243 @@ public class SimManager extends SimEntity {
             cloudServerManager = scenarioFactory.getCloudServerManager();
             mobileServerManager = scenarioFactory.getMobileServerManager();
             mobileDeviceManager = scenarioFactory.getMobileDeviceManager();
-            
-            // 如果ScenarioFactory是UAVMECScenarioFactory，获取UAVManager
-            if (scenarioFactory instanceof edu.boun.edgecloudsim.uav.UAVMECScenarioFactory) {
-                uavManager = ((edu.boun.edgecloudsim.uav.UAVMECScenarioFactory) scenarioFactory).getUAVManager();
+
+            if (scenarioFactory instanceof UAVMECScenarioFactory) {
+                uavManager = ((UAVMECScenarioFactory) scenarioFactory).getUAVManager();
             }
+
+            initializeEdgeCloudSimResources();
+            componentsInitialized = true;
         } catch (Exception e) {
-            e.printStackTrace();
-            System.exit(1);
+            throw new IllegalStateException("Cannot initialize EdgeCloudSim components", e);
         }
-    }
-    
-    /**
-     * 处理事件方法 - 添加事件处理逻辑
-     */
-    @Override
-    public void processEvent(SimEvent ev) {
-        if (ev == null) {
-            SimLogger.printLine("警告: SimManager收到空事件!");
-            return;
-        }
-        
-        switch (ev.getTag()) {
-            case PERIODIC_EVENT:
-                // 处理周期性事件
-                if (ev.getData() instanceof PeriodicEvent) {
-                    PeriodicEvent periodicEvent = (PeriodicEvent) ev.getData();
-                    SimLogger.printLine("SimManager处理周期性事件，时间: " + CloudSim.clock());
-                    periodicEvent.processEvent();
-                    
-                    // 安排下一次更新
-                    schedule(getId(), periodicEvent.getInterval(), PERIODIC_EVENT, periodicEvent);
-                }
-                break;
-                
-            case PROCESS_UAV_TASKS:
-                // 处理UAV任务
-                if (uavManager != null) {
-                    int processedTasks = uavManager.processTasks(1.0); // 处理1秒的任务
-                    SimLogger.printLine("处理UAV任务，完成数量: " + processedTasks + ", 时间: " + CloudSim.clock());
-                    
-                    // 安排下一次任务处理
-                    schedule(getId(), 1.0, PROCESS_UAV_TASKS);
-                }
-                break;
-                
-            default:
-                SimLogger.printLine("SimManager收到未知事件，标签: " + ev.getTag());
-                break;
-        }
-    }
-    
-    /**
-     * 启动实体方法 - 初始化组件并安排首个事件
-     */
-    @Override
-    public void startEntity() {
-        SimLogger.printLine("SimManager启动...");
-        
-        // 初始化组件
-        if (mobilityModel != null) mobilityModel.initialize();
-        if (networkModel != null) networkModel.initialize();
-        if (orchestrator != null) orchestrator.initialize();
-        if (uavManager != null) uavManager.initialize();
-        if (taskOffloadingEngine != null) taskOffloadingEngine.initialize();
-        
-        // 安排首个任务处理事件
-        schedule(getId(), 1.0, PROCESS_UAV_TASKS);
-        
-        SimLogger.printLine("SimManager初始化完成，安排了任务处理事件");
-    }
-    
-    /**
-     * 关闭实体方法
-     */
-    @Override
-    public void shutdownEntity() {
-        SimLogger.printLine("SimManager关闭...");
-    }
-    
-    /**
-     * 启动模拟
-     */
-    public void startSimulation() {
-        // 模拟启动逻辑
-        CloudSim.startSimulation();
-    }
-    
-    // ... [其余方法保持不变] ...
-    
-    /**
-     * 获取移动模型
-     */
-    public MobilityModel getMobilityModel() {
-        return mobilityModel;
-    }
-    
-    /**
-     * 获取网络模型
-     */
-    public NetworkModel getNetworkModel() {
-        return networkModel;
-    }
-    
-    /**
-     * 获取边缘编排器
-     */
-    public EdgeOrchestrator getEdgeOrchestrator() {
-        return orchestrator;
-    }
-    
-    /**
-     * 获取边缘服务器管理器
-     */
-    public EdgeServerManager getEdgeServerManager() {
-        return edgeServerManager;
-    }
-    
-    /**
-     * 获取云服务器管理器
-     */
-    public CloudServerManager getCloudServerManager() {
-        return cloudServerManager;
-    }
-    
-    /**
-     * 获取移动服务器管理器
-     */
-    public MobileServerManager getMobileServerManager() {
-        return mobileServerManager;
-    }
-    
-    /**
-     * 获取移动设备管理器
-     */
-    public MobileDeviceManager getMobileDeviceManager() {
-        return mobileDeviceManager;
-    }
-    
-    /**
-     * 获取UAV管理器
-     */
-    public UAVManager getUAVManager() {
-        return uavManager;
-    }
-    
-    /**
-     * 设置UAV管理器
-     */
-    public void setUAVManager(UAVManager uavManager) {
-        this.uavManager = uavManager;
-    }
-    
-    /**
-     * 获取任务卸载引擎
-     */
-    public TaskOffloadingEngine getTaskOffloadingEngine() {
-        return taskOffloadingEngine;
-    }
-    
-    /**
-     * 设置任务卸载引擎
-     */
-    public void setTaskOffloadingEngine(TaskOffloadingEngine engine) {
-        this.taskOffloadingEngine = engine;
-    }
-    
-    /**
-     * 设置性能监控器
-     */
-    public void setPerformanceMonitor(PerformanceMonitor monitor) {
-        this.performanceMonitor = monitor;
-    }
-    
-    /**
-     * 获取性能监控器
-     */
-    public PerformanceMonitor getPerformanceMonitor() {
-        return performanceMonitor;
-    }
-    
-    /**
-     * 获取模拟设置
-     */
-    public SimSettings getSimulationSettings() {
-        return simSettings;
-    }
-    
-    /**
-     * 获取模拟场景
-     */
-    public String getSimulationScenario() {
-        return simScenario;
     }
 
-    /**
-     * 获取移动设备数量
-     */
-    public int getNumOfMobileDevice() {
-        return numOfMobileDevice;
+    private void initializeEdgeCloudSimResources() throws Exception {
+        loadGeneratorModel.initializeModel();
+        edgeServerManager.initialize();
+        cloudServerManager.initialize();
+        mobileServerManager.initialize();
+        mobileDeviceManager.initialize();
+
+        edgeServerManager.startDatacenters();
+        cloudServerManager.startDatacenters();
+        mobileServerManager.startDatacenters();
+
+        int brokerId = mobileDeviceManager.getId();
+        edgeServerManager.createVmList(brokerId);
+        cloudServerManager.createVmList(brokerId);
+        mobileServerManager.createVmList(brokerId);
+
+        List<Vm> vmList = new ArrayList<>();
+        for (int hostId = 0; hostId < simSettings.getNumOfEdgeHosts(); hostId++) {
+            if (edgeServerManager.getVmList(hostId) != null) {
+                vmList.addAll(edgeServerManager.getVmList(hostId));
+            }
+        }
+        for (int hostId = 0; hostId < simSettings.getNumOfCloudHost(); hostId++) {
+            if (cloudServerManager.getVmList(hostId) != null) {
+                vmList.addAll(cloudServerManager.getVmList(hostId));
+            }
+        }
+        mobileDeviceManager.submitVmList(vmList);
+        SimLogger.printLine("EdgeCloudSim资源已初始化: " + vmList.size() + " 个VM");
     }
-    
-    /**
-     * 获取当前模拟时间
-     */
-    public double getSimulationTime() {
-        return CloudSim.clock();
+
+    @Override
+    public void processEvent(SimEvent event) {
+        if (event == null) {
+            return;
+        }
+
+        switch (event.getTag()) {
+            case SUBMIT_EDGE_TASK:
+                if (mobileDeviceManager != null && event.getData() instanceof TaskProperty) {
+                    submittedEdgeTaskCount++;
+                    if (gymCoordinator != null) {
+                        applyGymDecision(gymCoordinator.onTaskArrival((TaskProperty) event.getData()));
+                    } else {
+                        mobileDeviceManager.submitTask((TaskProperty) event.getData());
+                    }
+                }
+                break;
+
+            case PROCESS_UAV_TASKS:
+                processNextGymTaskIfReady();
+                if (uavManager != null) {
+                    uavManager.processTasks(1.0);
+                    if (performanceMonitor != null) {
+                        performanceMonitor.updateMetrics(1.0);
+                    }
+                    if (CloudSim.clock() + 1.0 <= simSettings.getSimulationTime()) {
+                        schedule(getId(), 1.0, PROCESS_UAV_TASKS);
+                    }
+                }
+                break;
+
+            case SUBMIT_UAV_TASK:
+                if (taskOffloadingEngine != null && event.getData() instanceof TaskProperty) {
+                    taskOffloadingEngine.submitTask((TaskProperty) event.getData());
+                }
+                break;
+
+            case MOVE_UAV:
+                if (uavManager != null && event.getData() instanceof UavMovementCommand) {
+                    UavMovementCommand command = (UavMovementCommand) event.getData();
+                    uavManager.moveUav(command.uavId, command.displacement);
+                }
+                break;
+
+            default:
+                SimLogger.printLine("SimManager收到未知事件，标签: " + event.getTag());
+                break;
+        }
     }
-    
-    /**
-     * 处理模拟结果
-     */
+
+    @Override
+    public void startEntity() {
+        mobilityModel.initialize();
+        networkModel.initialize();
+        orchestrator.initialize();
+
+        if (uavManager != null) {
+            uavManager.initialize();
+        }
+        if (taskOffloadingEngine != null) {
+            taskOffloadingEngine.initialize();
+        }
+
+        scheduledEdgeTaskCount = loadGeneratorModel.getTaskList().size();
+        if (gymCoordinator != null) {
+            gymCoordinator.setTotalTaskCount(scheduledEdgeTaskCount);
+            pendingGymTasks.addAll(loadGeneratorModel.getTaskList());
+            scheduleNextGymTask();
+        } else {
+            for (TaskProperty task : loadGeneratorModel.getTaskList()) {
+                schedule(getId(), Math.max(0.0, task.getStartTime()), SUBMIT_EDGE_TASK, task);
+            }
+        }
+        for (TaskProperty task : pendingUavTasks) {
+            schedule(getId(), Math.max(0.0, task.getStartTime()), SUBMIT_UAV_TASK, task);
+        }
+        pendingUavTasks.clear();
+        for (UavMovementCommand command : pendingUavMovements) {
+            schedule(getId(), Math.max(0.0, command.time), MOVE_UAV, command);
+        }
+        pendingUavMovements.clear();
+
+        if (uavManager != null) {
+            schedule(getId(), 1.0, PROCESS_UAV_TASKS);
+        }
+        CloudSim.terminateSimulation(simSettings.getSimulationTime() + TERMINATION_EPSILON);
+        SimLogger.printLine("EdgeCloudSim启动，已调度 " + loadGeneratorModel.getTaskList().size() + " 个任务");
+    }
+
+    @Override
+    public void shutdownEntity() {
+        if (taskOffloadingEngine != null) {
+            taskOffloadingEngine.close();
+        }
+        if (gymCoordinator != null) {
+            gymCoordinator.onSimulationEnded();
+        }
+        SimLogger.printLine("SimManager关闭");
+    }
+
+    public void startSimulation() {
+        CloudSim.startSimulation();
+    }
+
+    public MobilityModel getMobilityModel() { return mobilityModel; }
+    public NetworkModel getNetworkModel() { return networkModel; }
+    public EdgeOrchestrator getEdgeOrchestrator() { return orchestrator; }
+    public EdgeServerManager getEdgeServerManager() { return edgeServerManager; }
+    public CloudServerManager getCloudServerManager() { return cloudServerManager; }
+    public MobileServerManager getMobileServerManager() { return mobileServerManager; }
+    public MobileDeviceManager getMobileDeviceManager() { return mobileDeviceManager; }
+    public UAVManager getUAVManager() { return uavManager; }
+    public TaskOffloadingEngine getTaskOffloadingEngine() { return taskOffloadingEngine; }
+    public PerformanceMonitor getPerformanceMonitor() { return performanceMonitor; }
+    public SimSettings getSimulationSettings() { return simSettings; }
+    public String getSimulationScenario() { return simScenario; }
+    public int getNumOfMobileDevice() { return numOfMobileDevice; }
+    public double getSimulationTime() { return CloudSim.clock(); }
+    public int getScheduledEdgeTaskCount() { return scheduledEdgeTaskCount; }
+    public int getSubmittedEdgeTaskCount() { return submittedEdgeTaskCount; }
+
+    public void setUAVManager(UAVManager uavManager) { this.uavManager = uavManager; }
+    public void setTaskOffloadingEngine(TaskOffloadingEngine engine) { this.taskOffloadingEngine = engine; }
+    public void setPerformanceMonitor(PerformanceMonitor monitor) { this.performanceMonitor = monitor; }
+    public void setGymCoordinator(GymDecisionCoordinator coordinator) { this.gymCoordinator = coordinator; }
+    public GymDecisionCoordinator getGymCoordinator() { return gymCoordinator; }
+
+    public void scheduleUavTask(TaskProperty task) {
+        if (task != null) {
+            pendingUavTasks.add(task);
+        }
+    }
+
+    public void scheduleUavMovement(double time, int uavId, double[] displacement) {
+        if (displacement == null || displacement.length != 3) {
+            throw new IllegalArgumentException("UAV displacement must contain x, y, and z");
+        }
+        pendingUavMovements.add(new UavMovementCommand(time, uavId, displacement.clone()));
+    }
+
+    public void applyGymDecision(GymDecisionCoordinator.Decision decision) {
+        if (decision == null) {
+            return;
+        }
+        double[][] movements = decision.getMovements();
+        for (int i = 0; i < movements.length; i++) {
+            uavManager.moveUav(i, movements[i]);
+        }
+        if (mobileDeviceManager instanceof edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager) {
+            edu.boun.edgecloudsim.edge_client.Task task =
+                    ((edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager) mobileDeviceManager)
+                            .submitTask(decision.getTask(), decision.getTarget());
+            gymCoordinator.onTaskSubmitted(task, decision);
+            if (task == null || task.getCloudletStatus() != org.cloudbus.cloudsim.Cloudlet.CREATED) {
+                scheduleNextGymTask();
+            }
+        }
+    }
+
+    public void notifyGymTaskSettled(edu.boun.edgecloudsim.edge_client.Task task) {
+        if (gymCoordinator != null) {
+            gymCoordinator.onTaskSettled(task);
+            scheduleNextGymTask();
+        }
+    }
+
+    private void scheduleNextGymTask() {
+        nextGymTaskReady = !pendingGymTasks.isEmpty();
+    }
+
+    private void processNextGymTaskIfReady() {
+        TaskProperty next = pendingGymTasks.peekFirst();
+        if (!nextGymTaskReady || next == null || next.getStartTime() > CloudSim.clock()) {
+            return;
+        }
+        pendingGymTasks.removeFirst();
+        nextGymTaskReady = false;
+        submittedEdgeTaskCount++;
+        applyGymDecision(gymCoordinator.onTaskArrival(next));
+    }
+
+    private static final class UavMovementCommand {
+        private final double time;
+        private final int uavId;
+        private final double[] displacement;
+
+        private UavMovementCommand(double time, int uavId, double[] displacement) {
+            this.time = time;
+            this.uavId = uavId;
+            this.displacement = displacement;
+        }
+    }
+
     public void processResults() {
-        // 收集并处理结果
+        // Result aggregation remains in SimLogger for now.
     }
 }

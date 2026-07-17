@@ -18,6 +18,10 @@ public class SimUtils {
 
 	public static final Random RNG = new Random(System.currentTimeMillis());
 
+	public static void setSeed(long seed) {
+		RNG.setSeed(seed);
+	}
+
 	public static int getRandomNumber(int start, int end) {
 		//return pd.sample();
 		long range = (long)end - (long)start + 1;

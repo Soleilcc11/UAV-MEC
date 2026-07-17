@@ -133,7 +133,7 @@
                         <manifest>
                             <addClasspath>true</addClasspath>
                             <classpathPrefix>lib/</classpathPrefix>
-                            <mainClass>edu.boun.edgecloudsim.uav.TestPythonInterface</mainClass>
+                            <mainClass>edu.boun.edgecloudsim.uav.UAVMECMainApp</mainClass>
                         </manifest>
                     </archive>
                 </configuration>

@@ -6,14 +6,11 @@ import java.util.Calendar;
 import java.util.Date;
 import java.io.File;
 
-import org.cloudbus.cloudsim.Log;
 import org.cloudbus.cloudsim.core.CloudSim;
 
 import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.SimLogger;
-import edu.boun.edgecloudsim.utils.TaskProperty;
-import edu.boun.edgecloudsim.edge_orchestrator.EdgeOrchestrator;
 
 /**
  * UAV-MEC系统的主应用程序类
@@ -24,7 +21,6 @@ public class UAVMECMainApp {
     private static int numOfMobileDevice;
     private static String simScenario;
     private static String orchestratorPolicy;
-    private static TimeoutWatchdog watchdog;
     
     /**
      * 创建一个具有唯一名称的目录，用于存储模拟结果
@@ -66,9 +62,9 @@ public class UAVMECMainApp {
         // }
         
         // 默认参数值
-        String configFile = "configs/default_config.json";
-        String edgeDevicesFile = "configs/edge_devices.json";
-        String applicationsFile = "configs/applications.json";
+        String configFile = "src/main/resources/config/simulation_settings.xml";
+        String edgeDevicesFile = "src/main/resources/config/edge_devices.xml";
+        String applicationsFile = "src/main/resources/config/applications.xml";
         String outputFolder = "sim_results";
         int iterationNumber = 1;
         int numOfMobileDevices = 100;
@@ -113,9 +109,9 @@ public class UAVMECMainApp {
         SimLogger.getInstance().simStarted(outputFolder, iterationNumber);
         
         // 初始化全局参数
-        numOfMobileDevice = SimSettings.getInstance().getNumOfUAVs();
-        simScenario = "default"; // 或从配置中获取
-        orchestratorPolicy = "ddpg"; // 或从配置中获取
+        numOfMobileDevice = numOfMobileDevices;
+        simScenario = SimSettings.getInstance().getSimulationScenarios()[0];
+        orchestratorPolicy = SimSettings.getInstance().getOrchestratorPolicies()[0];
         
         // 运行模拟
         try {
@@ -151,9 +147,6 @@ public class UAVMECMainApp {
         
         // 配置任务卸载引擎和UAV管理器
         configureSimulationComponents(manager);
-        
-        // 添加此段代码 - 确保SimLogger正确初始化
-        SimLogger.getInstance().simStarted(SimLogger.getInstance().getOutputFolder(), iterationNumber);
         
         // 添加这一行 - 创建性能监控日志文件
         if (manager.getPerformanceMonitor() != null) {
@@ -195,89 +188,29 @@ public class UAVMECMainApp {
             SimLogger.printLine("Performance log file closed.");
         }
         
-        // 停止Watchdog
-        if (watchdog != null) {
-            watchdog.shutdown();
-        }
-        
         // 保存RL模型状态（如果使用）
         try {
             TaskOffloadingEngine engine = manager.getTaskOffloadingEngine();
             if (engine != null) {
                 SimLogger.printLine("Saving RL model state...");
                 // 实现模型保存逻辑
+                engine.close();
             }
         } catch (Exception e) {
             SimLogger.printLine("Failed to save RL model: " + e.getMessage());
         }
     }
     
-    /**
-     * 配置模拟组件 - 纯线程版本
-     */
+    /** Configure UAV monitoring without bypassing the EdgeCloudSim task path. */
     private static void configureSimulationComponents(SimManager manager) {
-        // 创建并配置UAV管理器
-        UAVManager uavManager = new UAVManager(manager);
+        UAVManager uavManager = manager.getUAVManager();
+        if (uavManager == null) {
+            uavManager = new UAVManager(manager);
+        }
         manager.setUAVManager(uavManager);
-        
-        // 创建并配置任务卸载引擎
-        TaskOffloadingEngine offloadingEngine = new TaskOffloadingEngine(manager);
-        manager.setTaskOffloadingEngine(offloadingEngine);
-        
-        // 设置性能监控
+
         PerformanceMonitor monitor = new PerformanceMonitor(manager);
         manager.setPerformanceMonitor(monitor);
-        
-        // 初始化UAV管理器 - 确保完成初始化
-        uavManager.initialize();
-        
-        // 添加TimeoutWatchdog - 使用独立线程方式
-        watchdog = new TimeoutWatchdog();
-        watchdog.start(); // 使用线程版start方法
-        SimLogger.printLine("TimeoutWatchdog已启动并集成到仿真中");
-        
-        // 创建并启动定期任务处理器
-        PeriodicEvent periodicEvent = new PeriodicEvent(0.0, 10.0, monitor, watchdog);
-        periodicEvent.start(); // 使用线程版start方法
-        SimLogger.printLine("定期任务处理器已启动");
-        
-        // 添加这段代码 - 生成初始任务
-        SimLogger.printLine("生成初始任务...");
-        int initialTaskCount = 20; // 根据需要调整
-        
-        for (int i = 0; i < initialTaskCount; i++) {
-            // 使用正确的TaskProperty构造函数
-            double startTime = 0.1 + (i * 0.5); // 每0.5秒提交一个任务
-            int mobileDeviceId = i % manager.getNumOfMobileDevice();
-            int taskType = 0; // 默认任务类型
-            int pesNumber = 1; // 处理元素数量
-            long length = 1000; // 任务长度(MI)
-            long inputFileSize = 100; // 任务输入大小(KB)
-            long outputFileSize = 10; // 任务输出大小(KB)
-            
-            TaskProperty task = new TaskProperty(
-                startTime,        // 开始时间
-                mobileDeviceId,   // 移动设备ID
-                taskType,         // 任务类型
-                pesNumber,        // 处理元素数量
-                length,           // 任务长度
-                inputFileSize,    // 输入文件大小
-                outputFileSize    // 输出文件大小
-            );
-            
-            // 提交任务
-            SimLogger.printLine("提交任务 #" + i + " 开始时间: " + startTime);
-            
-            // 使用改进后的任务提交方法
-            if (offloadingEngine != null) {
-                // 需要在TaskOffloadingEngine中实现submitTask方法
-                offloadingEngine.submitTask(task);
-            } else {
-                SimLogger.printLine("错误: 任务卸载引擎为空");
-            }
-        }
-        
-        SimLogger.printLine("已生成" + initialTaskCount + "个初始任务");
     }
     
     /**

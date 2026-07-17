@@ -278,7 +278,6 @@ public class SimLogger {
      */
     public void taskFailed(int taskId, int reason) {
         LogItem task = taskMap.get(taskId);
-        task.status = 1; // 设置状态为完成
         if(task == null) {
             System.out.println("Cannot find task with ID: " + taskId);
             return;
@@ -664,9 +663,11 @@ public class SimLogger {
     /**
      * 添加扩展日志（支持多参数）
      */
-    public int addLog(int taskType, int offloadingDestination, int taskLength, int requestedCores, int requestedRam, int requestedStorage) {
-        int taskId = addLog(taskType, offloadingDestination);
-        setTaskProperty(taskId, taskLength, requestedCores, 0.0, requestedRam, requestedStorage);
+    public int addLog(int mobileDeviceId, int taskId, int taskType, int taskLength,
+            int taskInputSize, int taskOutputSize) {
+        taskMap.put(taskId, new LogItem(taskType, 0));
+        setTaskProperty(taskId, taskLength, 0, 0.0, 0, 0);
+        pendingLogs = true;
         return taskId;
     }
 	public void addApDelayLog(double time, double[] source, double[] destination) {

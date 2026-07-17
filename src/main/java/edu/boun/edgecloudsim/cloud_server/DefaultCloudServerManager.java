@@ -135,10 +135,10 @@ public class DefaultCloudServerManager extends CloudServerManager{
 		for (int i = 0; i < SimSettings.getInstance().getNumOfCloudHost(); i++) {
 			int numOfVMPerHost = SimSettings.getInstance().getNumOfCloudVMsPerHost();
 				String vmm = "Xen";
-				int numOfCores = SimSettingsExtensions.getCoreForCloudVM(SimSettings.getInstance());
+				int numOfCores = SimSettingsExtensions.getCoreForCloudVM(SimSettings.getInstance()) * numOfVMPerHost;
 				double mips = SimSettingsExtensions.getMipsForCloudVM(SimSettings.getInstance());
-				int ram = SimSettingsExtensions.getRamForCloudVM(SimSettings.getInstance());
-				long storage = SimSettingsExtensions.getStorageForCloudVM(SimSettings.getInstance());
+				int ram = SimSettingsExtensions.getRamForCloudVM(SimSettings.getInstance()) * numOfVMPerHost;
+				long storage = (long) SimSettingsExtensions.getStorageForCloudVM(SimSettings.getInstance()) * numOfVMPerHost;
 				long bandwidth = 0;
 							
 							// 2. A Machine contains one or more PEs or CPUs/Cores. Therefore, should

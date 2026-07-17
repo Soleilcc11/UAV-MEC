@@ -1,11 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <edge_devices>
     <datacenter arch="x86" os="Linux" vmm="Xen">
+        <costPerBw>0</costPerBw>
+        <costPerSec>0</costPerSec>
+        <costPerMem>0</costPerMem>
+        <costPerStorage>0</costPerStorage>
         <host>
             <core>4</core>
             <mips>10000</mips>
             <ram>16000</ram>
             <storage>10000</storage>
+            <VM vmm="Xen">
+                <core>2</core>
+                <mips>5000</mips>
+                <ram>4096</ram>
+                <storage>5000</storage>
+            </VM>
         </host>
         <location>
             <attractiveness>10</attractiveness>
@@ -15,11 +25,21 @@
         </location>
     </datacenter>
     <datacenter arch="x86" os="Linux" vmm="Xen">
+        <costPerBw>0</costPerBw>
+        <costPerSec>0</costPerSec>
+        <costPerMem>0</costPerMem>
+        <costPerStorage>0</costPerStorage>
         <host>
             <core>4</core>
             <mips>10000</mips>
             <ram>16000</ram>
             <storage>10000</storage>
+            <VM vmm="Xen">
+                <core>2</core>
+                <mips>5000</mips>
+                <ram>4096</ram>
+                <storage>5000</storage>
+            </VM>
         </host>
         <location>
             <attractiveness>8</attractiveness>
@@ -29,11 +49,21 @@
         </location>
     </datacenter>
     <datacenter arch="x86" os="Linux" vmm="Xen">
+        <costPerBw>0</costPerBw>
+        <costPerSec>0</costPerSec>
+        <costPerMem>0</costPerMem>
+        <costPerStorage>0</costPerStorage>
         <host>
             <core>4</core>
             <mips>10000</mips>
             <ram>16000</ram>
             <storage>10000</storage>
+            <VM vmm="Xen">
+                <core>2</core>
+                <mips>5000</mips>
+                <ram>4096</ram>
+                <storage>5000</storage>
+            </VM>
         </host>
         <location>
             <attractiveness>8</attractiveness>

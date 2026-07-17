@@ -12,6 +12,8 @@ import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.SimLogger;
 import edu.boun.edgecloudsim.edge_orchestrator.EdgeOrchestrator;
+import edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager;
+import edu.boun.edgecloudsim.edge_client.Task;
 
 /**
  * UAV管理器类，负责管理无人机
@@ -21,6 +23,9 @@ public class UAVManager {
     private List<UAV> uavList;
     private Random random;
     private AtomicInteger completedTasks;
+    private Map<String, Task> activeEdgeTasks;
+    private int movementCommandCount;
+    private int boundaryConstraintCount;
     
     // 定义任务完成事件类型
     public static final int UAV_TASK_COMPLETED = 9999;
@@ -34,6 +39,7 @@ public class UAVManager {
         this.uavList = new ArrayList<>();
         this.random = new Random(42); // 固定随机种子以实现可重复的模拟
         this.completedTasks = new AtomicInteger(0);
+        this.activeEdgeTasks = new HashMap<>();
         
         // 在构造函数中初始化，因为simManager还没有完全设置好
     }
@@ -42,7 +48,11 @@ public class UAVManager {
      * 初始化UAV管理器
      */
     public void initialize() {
+        if (!uavList.isEmpty()) {
+            return;
+        }
         SimSettings simSettings = simManager.getSimulationSettings();
+        random.setSeed(simSettings.getSimulationSeed());
         int numUavs = simSettings.getNumOfUAVs();
         
         SimLogger.printLine("初始化 " + numUavs + " 个UAV...");
@@ -57,6 +67,10 @@ public class UAVManager {
             double processingCapacity = 1500 + random.nextDouble() * 1000; // 提高至1500-2500 MIPS
 
             UAV uav = new UAV(i, position, initialEnergy, processingCapacity);
+            uav.configureEnergyModel(
+                    simSettings.getUAVFlightPower(),
+                    simSettings.getUAVHoverPower(),
+                    simSettings.getUAVComputeEnergyPerMi());
             uavList.add(uav);
             
             SimLogger.printLine("UAV " + i + " 创建在位置 (" + 
@@ -76,13 +90,22 @@ public class UAVManager {
             double[] moveDirection = (double[]) action.get("moveDirection");
             
             if (uavId >= 0 && uavId < uavList.size()) {
-                UAV uav = uavList.get(uavId);
-                double[] newPosition = uav.updatePosition(moveDirection);
-                
-                // 检查边界条件
-                enforceBoundaryConstraints(uav, newPosition);
+                moveUav(uavId, moveDirection);
             }
         }
+    }
+
+    public boolean moveUav(int uavId, double[] displacement) {
+        UAV uav = getUAV(uavId);
+        if (uav == null || displacement == null || displacement.length != 3) {
+            return false;
+        }
+        double[] newPosition = uav.updatePosition(displacement.clone());
+        movementCommandCount++;
+        if (enforceBoundaryConstraints(uav, newPosition)) {
+            boundaryConstraintCount++;
+        }
+        return true;
     }
     
     /**
@@ -123,9 +146,6 @@ public class UAVManager {
     public int processTasks(double timeSlot) {
         int newCompletedTaskCount = 0;
         
-        // 生成随机任务以便模拟可以产生有意义的输出
-        generateRandomTasks();
-        
         for (UAV uav : uavList) {
             List<UAV.Task> newCompletedTasks = uav.processTasks(timeSlot);
             newCompletedTaskCount += newCompletedTasks.size();
@@ -143,34 +163,6 @@ public class UAVManager {
         }
         
         return newCompletedTaskCount;
-    }
-    
-    /**
-     * 生成随机任务，分配给UAV处理
-     */
-    private void generateRandomTasks() {
-        // 每次调用有10%的概率生成新任务
-        if (random.nextDouble() < 0.1) {
-            // 随机选择一个UAV
-            int uavId = random.nextInt(uavList.size());
-            UAV uav = uavList.get(uavId);
-            
-            // 生成任务
-            String taskId = "Task_" + System.currentTimeMillis() + "_" + random.nextInt(1000);
-            double totalMI = 1000 + random.nextDouble() * 4000; // 1000-5000 MI的任务
-            
-            UAV.Task task = new UAV.Task(taskId, totalMI);
-            
-            // 分配任务给UAV
-            boolean assigned = uav.addTask(task);
-            
-            if (assigned) {
-                SimLogger.printLine("生成新任务 " + taskId + " 分配给 UAV " + uavId + 
-                               "，任务工作量：" + totalMI + " MI");
-            } else {
-                SimLogger.printLine("UAV " + uavId + " 任务队列已满，无法分配新任务");
-            }
-        }
     }
     
     /**
@@ -197,19 +189,15 @@ public class UAVManager {
                         ", 当前仿真时间: " + (long)(simManager.getSimulationTime() * 1000) + 
                         ", 总完成数: " + newCount);
         
-        // 记录到日志文件
-        double simCurrentTime = simManager.getSimulationTime();
-        double taskArrivalTime = task.getArrivalTime() / 1000.0; // 毫秒转秒
-        double taskCompletionTime = task.getCompletionTime() / 1000.0; // 毫秒转秒
-        
-        // 记录任务完成
-        SimLogger.getInstance().taskCompleted(
-            task.getId(), 
-            taskArrivalTime, 
-            taskCompletionTime, 
-            task.getTotalMI()
-        );
-        
+        Task edgeTask = activeEdgeTasks.remove(task.getId());
+        if (edgeTask != null) {
+            if (simManager.getMobileDeviceManager() instanceof DefaultMobileDeviceManager) {
+                ((DefaultMobileDeviceManager) simManager.getMobileDeviceManager())
+                        .uavTaskCompleted(edgeTask);
+            }
+            return;
+        }
+
         // 通知相关组件
         try {
             TaskOffloadingEngine engine = (TaskOffloadingEngine)simManager.getTaskOffloadingEngine();
@@ -239,10 +227,10 @@ public class UAVManager {
         double[] position = new double[3];
         
         // X坐标
-        position[0] = simSettings.getRandomPositionX();
+        position[0] = random.nextDouble() * simSettings.getSimulationSpace()[0];
         
         // Y坐标
-        position[1] = simSettings.getRandomPositionY();
+        position[1] = random.nextDouble() * simSettings.getSimulationSpace()[1];
         
         // Z坐标（高度）
         position[2] = simSettings.getUAVInitialHeight();
@@ -255,12 +243,16 @@ public class UAVManager {
      * @param uav UAV对象
      * @param position 位置坐标
      */
-    private void enforceBoundaryConstraints(UAV uav, double[] position) {
+    private boolean enforceBoundaryConstraints(UAV uav, double[] position) {
         SimSettings simSettings = simManager.getSimulationSettings();
         double[] simSpace = simSettings.getSimulationSpace();
         double minHeight = simSettings.getUAVMinHeight();
         double maxHeight = simSettings.getUAVMaxHeight();
         
+        double originalX = position[0];
+        double originalY = position[1];
+        double originalZ = position[2];
+
         // X边界
         if (position[0] < 0) position[0] = 0;
         if (position[0] > simSpace[0]) position[0] = simSpace[0];
@@ -272,6 +264,7 @@ public class UAVManager {
         // Z边界（高度）
         if (position[2] < minHeight) position[2] = minHeight;
         if (position[2] > maxHeight) position[2] = maxHeight;
+        return originalX != position[0] || originalY != position[1] || originalZ != position[2];
     }
     
     /**
@@ -371,6 +364,32 @@ public class UAVManager {
             return false;
         }
         return uav.addTask(task);
+    }
+
+    /** Submit an EdgeCloudSim task to a concrete UAV resource. */
+    public boolean submitEdgeTask(int uavId, Task edgeTask) {
+        String internalId = "edgecloudsim-" + edgeTask.getCloudletId();
+        UAV.Task uavTask = new UAV.Task(
+                internalId,
+                edgeTask.getCloudletLength(),
+                (long) (org.cloudbus.cloudsim.core.CloudSim.clock() * 1000));
+        if (!assignTask(uavId, uavTask)) {
+            return false;
+        }
+        activeEdgeTasks.put(internalId, edgeTask);
+        return true;
+    }
+
+    public int getActiveEdgeTaskCount() {
+        return activeEdgeTasks.size();
+    }
+
+    public int getMovementCommandCount() {
+        return movementCommandCount;
+    }
+
+    public int getBoundaryConstraintCount() {
+        return boundaryConstraintCount;
     }
     
     /**

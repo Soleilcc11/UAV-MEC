@@ -1,35 +1,29 @@
 package edu.boun.edgecloudsim.uav;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.cloudbus.cloudsim.core.CloudSim;
-
-import edu.boun.edgecloudsim.utils.ArrayUtils;
-
 import edu.boun.edgecloudsim.core.ExecutionTarget;
 import edu.boun.edgecloudsim.core.SimManager;
-import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.SimLogger;
 import edu.boun.edgecloudsim.utils.TaskProperty;
 
 /**
- * 任务卸载引擎，负责使用RL进行任务卸载决策
+ * Legacy UAV task adapter.
+ *
+ * <p>Gymnasium owns all learned decisions through {@link GymBridgeServer}.
+ * This adapter intentionally contains no Python client or training path and
+ * only provides a deterministic heuristic for non-Gym legacy callers.</p>
  */
 public class TaskOffloadingEngine {
     private SimManager simManager;
-    private EnhancedPythonInterface pythonInterface;
-    private StateActionManager stateActionManager;
-    private RewardCalculator rewardCalculator;
     private Map<String, UAV.Task> activeTasks;
     private AtomicInteger totalTaskCount;
     private AtomicInteger completedTasks;
     private AtomicInteger rejectedTaskCount;
     private double totalLatency;
-    private boolean useDQN; // 是否使用DQN算法
     
     private static final int MAX_TASK_QUEUE_LENGTH = 50; // 最大队列长度
     private static final double DEFAULT_TASK_LENGTH = 1000.0; // 默认任务长度(MI)
@@ -46,27 +40,6 @@ public class TaskOffloadingEngine {
         this.completedTasks = new AtomicInteger(0);
         this.rejectedTaskCount = new AtomicInteger(0);
         this.totalLatency = 0.0;
-        this.useDQN = false;
-        
-        // 初始化状态动作管理器和奖励计算器
-        this.stateActionManager = new StateActionManager(simManager);
-        this.rewardCalculator = new RewardCalculator(simManager);
-        
-        // 连接到Python RL服务器
-        try {
-            this.pythonInterface = new EnhancedPythonInterface("localhost", 12345);
-            if (pythonInterface.connect()) {
-                SimLogger.printLine("成功连接到RL服务器");
-            } else {
-                SimLogger.printLine("无法连接到RL服务器，将使用默认策略");
-                pythonInterface.shutdown();
-                this.pythonInterface = null;
-            }
-        } catch (Exception e) {
-            SimLogger.printLine("初始化RL接口时出错: " + e.getMessage());
-            SimLogger.printLine("将使用默认策略");
-            this.pythonInterface = null;
-        }
     }
     
     /**
@@ -82,69 +55,7 @@ public class TaskOffloadingEngine {
      * @return typed execution target
      */
     public ExecutionTarget getOffloadingTarget(UAV.Task task) {
-        // 确保状态动作管理器已初始化
-        if (stateActionManager == null) {
-            SimLogger.printLine("警告: StateActionManager未初始化，使用默认决策");
-            return getDefaultTarget();
-        }
-        
-        // 生成当前状态
-        double[] state = stateActionManager.generateState();
-        
-        if (pythonInterface != null && pythonInterface.isConnected()) {
-            // 使用RL模型获取动作
-            try {
-                final ExecutionTarget[] decision = {null};
-                final boolean[] completed = {false};
-                
-                pythonInterface.getActionAsync(state, new EnhancedPythonInterface.Callback<double[]>() {
-                    @Override
-                    public void onSuccess(double[] action) {
-                        // 解析动作为卸载决策
-                        List<Map<String, Object>> actions = stateActionManager.parseOffloadingDecision(action);
-                        
-                        // 在这个简化的实现中，我们只取第一个动作作为卸载目标
-                        if (actions.size() > 0) {
-                            decision[0] = ExecutionTarget.uav((int) actions.get(0).get("uavId"));
-                        }
-                        
-                        completed[0] = true;
-                    }
-                    
-                    @Override
-                    public void onFailure(Exception e) {
-                        SimLogger.printLine("获取RL动作失败: " + e.getMessage());
-                        decision[0] = getDefaultTarget();
-                        completed[0] = true;
-                    }
-                });
-                
-                // 等待回调完成（在实际系统中可能需要异步处理）
-                int waitCount = 0;
-                while (!completed[0] && waitCount < 100) {
-                    try {
-                        Thread.sleep(10);
-                    } catch (InterruptedException e) {
-                        SimLogger.printLine("等待RL决策时被中断");
-                        break;
-                    }
-                    waitCount++;
-                }
-                
-                if (!completed[0]) {
-                    SimLogger.printLine("获取RL动作超时，使用默认决策");
-                    return getDefaultTarget();
-                }
-
-                return decision[0] != null ? decision[0] : getDefaultTarget();
-            } catch (Exception e) {
-                SimLogger.printLine("使用RL进行卸载决策时出错: " + e.getMessage());
-                return getDefaultTarget();
-            }
-        } else {
-            // 使用默认策略
-            return getDefaultTarget();
-        }
+        return getDefaultTarget();
     }
 
     /**
@@ -304,66 +215,6 @@ public class TaskOffloadingEngine {
         SimLogger.getInstance().taskCompleted(
             taskId, arrivalTimeSeconds, completionTimeSeconds, task.getTotalMI());
         
-        // RL模型训练部分添加错误处理
-        if (pythonInterface != null && pythonInterface.isConnected()) {
-            try {
-                trainRLModel(task, latency);
-            } catch (Exception e) {
-                SimLogger.printLine("[ERROR] RL模型训练失败: " + e.getMessage());
-            }
-        }
-    }
-    
-    /**
-     * 训练RL模型
-     * @param task 完成的任务
-     * @param latency 任务延迟
-     */
-    private void trainRLModel(UAV.Task task, long latency) {
-        // 获取状态、动作和奖励
-        double[] state = stateActionManager.getLastState();
-        double[] action = stateActionManager.getLastAction();
-        double[] nextState = stateActionManager.generateState();
-        double reward = rewardCalculator.calculateReward(latency, (long) task.getTotalMI());
-
-        if (state == null || action == null) {
-            SimLogger.printLine("跳过训练：当前任务没有完整的状态/动作轨迹");
-            return;
-        }
-        
-        // 异步训练RL模型
-        pythonInterface.trainAsync(state, action, reward, nextState, false, 
-            new EnhancedPythonInterface.Callback<Boolean>() {
-                @Override
-                public void onSuccess(Boolean result) {
-                    if (result) {
-                        SimLogger.printLine("RL模型训练成功");
-                    } else {
-                        SimLogger.printLine("RL模型训练失败");
-                    }
-                }
-                
-                @Override
-                public void onFailure(Exception e) {
-                    SimLogger.printLine("RL模型训练出错: " + e.getMessage());
-                }
-            });
-    }
-    
-    /**
-     * 获取Python接口
-     * @return Python接口
-     */
-    public EnhancedPythonInterface getPythonInterface() {
-        return pythonInterface;
-    }
-    
-    /**
-     * 获取状态动作管理器
-     * @return 状态动作管理器
-     */
-    public StateActionManager getStateActionManager() {
-        return stateActionManager;
     }
     
     /**
@@ -402,14 +253,7 @@ public class TaskOffloadingEngine {
      * 关闭引擎
      */
     public void close() {
-        // 关闭Python接口
-        if (pythonInterface != null) {
-            try {
-                pythonInterface.close();
-            } catch (Exception e) {
-                SimLogger.printLine("关闭Python接口时出错: " + e.getMessage());
-            }
-        }
+        // No external resources: GymBridge owns the Python connection.
     }
     
     /**

@@ -15,7 +15,7 @@ import edu.boun.edgecloudsim.edge_client.Task;
 import edu.boun.edgecloudsim.utils.Location;
 import edu.boun.edgecloudsim.utils.TaskProperty;
 
-/** Coordinates task-arrival Gymnasium decision epochs with CloudSim pause/resume. */
+/** Coordinates blocking task-arrival Gymnasium decision epochs on the simulation thread. */
 public class GymDecisionCoordinator {
     private final SimManager manager;
     private final Deque<TaskProperty> waitingTasks = new ArrayDeque<>();
@@ -30,6 +30,7 @@ public class GymDecisionCoordinator {
     private boolean closed;
     private int totalTaskCount;
     private int settledTaskCount;
+    private double lastSimulationTime;
 
     public GymDecisionCoordinator(SimManager manager) {
         this.manager = manager;
@@ -39,7 +40,7 @@ public class GymDecisionCoordinator {
         this.totalTaskCount = totalTaskCount;
     }
 
-    public synchronized void onTaskArrival(TaskProperty task) {
+    public synchronized Decision onTaskArrival(TaskProperty task) {
         waitingTasks.addLast(task);
         if (activeTask == null && currentTask == null) {
             currentTask = waitingTasks.removeFirst();
@@ -48,9 +49,10 @@ public class GymDecisionCoordinator {
             } else {
                 stepResultReady = true;
             }
-            CloudSim.pauseSimulation();
             notifyAll();
+            return awaitDecision();
         }
+        return null;
     }
 
     public synchronized JSONObject awaitInitialObservation(long timeoutMillis)
@@ -83,14 +85,17 @@ public class GymDecisionCoordinator {
         currentTask = null;
         initialDecisionReady = false;
         stepResultReady = false;
+        notifyAll();
         return activeDecision;
     }
 
-    public synchronized void onTaskSubmitted(Task task, Decision decision) {
+    public synchronized boolean onTaskSubmitted(Task task, Decision decision) {
         activeTask = task;
         if (task == null) {
-            settle(null, false);
-            return;
+            return settle(null, false);
+        }
+        if (task.getCloudletStatus() != Cloudlet.CREATED) {
+            return settle(task, false);
         }
         int legacyTarget = decision.target.toLegacyDeviceId();
         if (decision.target.getType() != ExecutionTarget.Type.LOCAL) {
@@ -98,17 +103,19 @@ public class GymDecisionCoordinator {
                     task.getMobileDeviceId(), legacyTarget, task);
             decision.ueEnergyJoules = Math.max(0.0, uploadDelay) * 0.1;
         }
+        return false;
     }
 
-    public synchronized void onTaskSettled(Task task) {
+    public synchronized boolean onTaskSettled(Task task) {
         if (activeTask == null || task == null
                 || task.getCloudletId() != activeTask.getCloudletId()) {
-            return;
+            return false;
         }
-        settle(task, task.getCloudletStatus() == Cloudlet.SUCCESS);
+        return settle(task, task.getCloudletStatus() == Cloudlet.SUCCESS);
     }
 
-    private void settle(Task task, boolean success) {
+    private boolean settle(Task task, boolean success) {
+        lastSimulationTime = Math.max(lastSimulationTime, CloudSim.clock());
         double latencySeconds = Math.max(0.0, CloudSim.clock() - activeDecision.decisionTime);
         double uavEnergy = Math.max(0.0,
                 totalUavEnergyConsumed() - activeDecision.startUavEnergy);
@@ -133,13 +140,24 @@ public class GymDecisionCoordinator {
         if (settledTaskCount >= totalTaskCount) {
             terminated = true;
             stepResultReady = true;
-            CloudSim.pauseSimulation();
         } else if (!waitingTasks.isEmpty()) {
             currentTask = waitingTasks.removeFirst();
             stepResultReady = true;
-            CloudSim.pauseSimulation();
         }
         notifyAll();
+        return currentTask != null;
+    }
+
+    private Decision awaitDecision() {
+        while (activeDecision == null && !closed) {
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                closed = true;
+            }
+        }
+        return closed ? null : activeDecision;
     }
 
     public synchronized StepResult awaitStepResult(long timeoutMillis) throws InterruptedException {
@@ -155,13 +173,17 @@ public class GymDecisionCoordinator {
                 new JSONObject()
                         .put("settled_tasks", settledTaskCount)
                         .put("total_tasks", totalTaskCount)
-                        .put("simulation_time", CloudSim.clock()));
+                        .put("simulation_time", Math.max(lastSimulationTime, CloudSim.clock())));
         pendingRewardComponents = null;
         stepResultReady = false;
         return result;
     }
 
     public synchronized void onSimulationEnded() {
+        lastSimulationTime = CloudSim.clock();
+        if (activeDecision != null) {
+            settle(activeTask, false);
+        }
         if (!terminated) {
             truncated = true;
             stepResultReady = true;

@@ -60,11 +60,7 @@ public class GymBridgeSession implements AutoCloseable {
     public synchronized JSONObject step(int target, double[][] movement, long timeoutMillis)
             throws Exception {
         ensureActive();
-        GymDecisionCoordinator.Decision decision = coordinator.beginDecision(target, movement);
-        manager.applyGymDecision(decision);
-        if (CloudSim.isPaused()) {
-            CloudSim.resumeSimulation();
-        }
+        coordinator.beginDecision(target, movement);
         GymDecisionCoordinator.StepResult result = coordinator.awaitStepResult(timeoutMillis);
         return new JSONObject()
                 .put("observation", result.getObservation())

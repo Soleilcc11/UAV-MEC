@@ -12,6 +12,8 @@ import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.SimLogger;
 import edu.boun.edgecloudsim.edge_orchestrator.EdgeOrchestrator;
+import edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager;
+import edu.boun.edgecloudsim.edge_client.Task;
 
 /**
  * UAV管理器类，负责管理无人机
@@ -21,6 +23,7 @@ public class UAVManager {
     private List<UAV> uavList;
     private Random random;
     private AtomicInteger completedTasks;
+    private Map<String, Task> activeEdgeTasks;
     
     // 定义任务完成事件类型
     public static final int UAV_TASK_COMPLETED = 9999;
@@ -34,6 +37,7 @@ public class UAVManager {
         this.uavList = new ArrayList<>();
         this.random = new Random(42); // 固定随机种子以实现可重复的模拟
         this.completedTasks = new AtomicInteger(0);
+        this.activeEdgeTasks = new HashMap<>();
         
         // 在构造函数中初始化，因为simManager还没有完全设置好
     }
@@ -169,6 +173,15 @@ public class UAVManager {
                         ", 当前仿真时间: " + (long)(simManager.getSimulationTime() * 1000) + 
                         ", 总完成数: " + newCount);
         
+        Task edgeTask = activeEdgeTasks.remove(task.getId());
+        if (edgeTask != null) {
+            if (simManager.getMobileDeviceManager() instanceof DefaultMobileDeviceManager) {
+                ((DefaultMobileDeviceManager) simManager.getMobileDeviceManager())
+                        .uavTaskCompleted(edgeTask);
+            }
+            return;
+        }
+
         // 通知相关组件
         try {
             TaskOffloadingEngine engine = (TaskOffloadingEngine)simManager.getTaskOffloadingEngine();
@@ -330,6 +343,24 @@ public class UAVManager {
             return false;
         }
         return uav.addTask(task);
+    }
+
+    /** Submit an EdgeCloudSim task to a concrete UAV resource. */
+    public boolean submitEdgeTask(int uavId, Task edgeTask) {
+        String internalId = "edgecloudsim-" + edgeTask.getCloudletId();
+        UAV.Task uavTask = new UAV.Task(
+                internalId,
+                edgeTask.getCloudletLength(),
+                (long) (org.cloudbus.cloudsim.core.CloudSim.clock() * 1000));
+        if (!assignTask(uavId, uavTask)) {
+            return false;
+        }
+        activeEdgeTasks.put(internalId, edgeTask);
+        return true;
+    }
+
+    public int getActiveEdgeTaskCount() {
+        return activeEdgeTasks.size();
     }
     
     /**

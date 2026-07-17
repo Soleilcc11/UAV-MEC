@@ -3,9 +3,11 @@ package edu.boun.edgecloudsim.uav;
 import org.cloudbus.cloudsim.Vm;
 import org.cloudbus.cloudsim.core.SimEvent;
 import edu.boun.edgecloudsim.edge_orchestrator.EdgeOrchestrator;
+import edu.boun.edgecloudsim.core.ExecutionTarget;
 import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.edge_client.Task;
+import edu.boun.edgecloudsim.utils.Location;
 
 /**
  * 任务卸载编排器，适配EdgeOrchestrator接口
@@ -32,24 +34,17 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
      */
     @Override
     public int getDeviceToOffload(Task task) {
-        // 从任务中获取移动设备ID
-        int mobileDeviceId = task.getMobileDeviceId();
-        
-        // 调用内部方法处理设备ID
-        return getDeviceToOffload(mobileDeviceId);
+        return getExecutionTarget(task).toLegacyDeviceId();
     }
-    
-    /**
-     * 内部方法：根据移动设备ID获取卸载目标设备
-     */
-    private int getDeviceToOffload(int mobileDeviceId) {
-        // 根据移动设备ID获取卸载目标设备
-        double[] location = getMobileDeviceLocation(mobileDeviceId);
+
+    @Override
+    public ExecutionTarget getExecutionTarget(Task task) {
+        double[] location = getMobileDeviceLocation(task.getMobileDeviceId());
         
         // 找到最近的UAV
         UAVManager uavManager = simManager.getUAVManager();
         if (uavManager == null) {
-            return TaskOffloadingEngine.CLOUD_EXECUTION;
+            return ExecutionTarget.cloud();
         }
         int nearestUavId = uavManager.findNearestUAV(location[0], location[1]);
         UAV nearestUAV = null;
@@ -60,13 +55,13 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
         // 简化的决策逻辑
         if (nearestUAV == null || nearestUAV.getEnergy() <= 0) {
             // 如果没有可用UAV，卸载到云
-            return TaskOffloadingEngine.CLOUD_EXECUTION;
+            return ExecutionTarget.cloud();
         } else if (nearestUAV.getAvailableCapacity() > 0) {
             // 如果最近的UAV有足够容量，卸载到UAV
-            return TaskOffloadingEngine.UAV_EXECUTION;
+            return ExecutionTarget.uav(nearestUavId);
         } else {
             // 否则本地执行
-            return TaskOffloadingEngine.LOCAL_EXECUTION;
+            return ExecutionTarget.local();
         }
     }
     
@@ -75,11 +70,9 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
      * 这是一个帮助方法，根据移动设备ID返回其位置
      */
     private double[] getMobileDeviceLocation(int mobileDeviceId) {
-        // 简化版：返回随机位置，实际应从SimManager获取
-        return new double[] {
-            SimSettings.getInstance().getRandomPositionX(),
-            SimSettings.getInstance().getRandomPositionY()
-        };
+        Location location = simManager.getMobilityModel().getLocation(
+                mobileDeviceId, org.cloudbus.cloudsim.core.CloudSim.clock());
+        return new double[] { location.getXPos(), location.getYPos() };
     }
 
     @Override
@@ -101,7 +94,10 @@ public class TaskOffloadingOrchestrator extends EdgeOrchestrator {
         } else if (deviceId == SimSettings.MOBILE_DATACENTER_ID) {
             return getMobileDeviceVm(task.getMobileDeviceId());
         } else {
-            return getEdgeServerVm(deviceId);
+            int hostId = task.getSubmittedLocation() == null
+                    ? 0
+                    : task.getSubmittedLocation().getServingWlanId();
+            return getEdgeServerVm(hostId);
         }
     }
 

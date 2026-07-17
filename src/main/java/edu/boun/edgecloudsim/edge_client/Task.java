@@ -15,6 +15,7 @@ import org.cloudbus.cloudsim.Cloudlet;
 import org.cloudbus.cloudsim.UtilizationModel;
 import org.cloudbus.cloudsim.core.CloudSim;
 
+import edu.boun.edgecloudsim.core.ExecutionTarget;
 import edu.boun.edgecloudsim.utils.Location;
 
 public class Task extends Cloudlet {
@@ -25,6 +26,7 @@ public class Task extends Cloudlet {
 	private int hostIndex;
 	private int vmIndex;
 	private int datacenterId;
+	private ExecutionTarget executionTarget;
 
 	public Task(int _mobileDeviceId, int cloudletId, long cloudletLength, int pesNumber,
 			long cloudletFileSize, long cloudletOutputSize,
@@ -60,6 +62,10 @@ public class Task extends Cloudlet {
 		type=_type;
 	}
 
+	public void setExecutionTarget(ExecutionTarget executionTarget) {
+		this.executionTarget = executionTarget;
+	}
+
 	public int getMobileDeviceId(){
 		return mobileDeviceId;
 	}
@@ -82,6 +88,10 @@ public class Task extends Cloudlet {
 	
 	public int getTaskType(){
 		return type;
+	}
+
+	public ExecutionTarget getExecutionTarget() {
+		return executionTarget;
 	}
 	
 	public double getCreationTime() {

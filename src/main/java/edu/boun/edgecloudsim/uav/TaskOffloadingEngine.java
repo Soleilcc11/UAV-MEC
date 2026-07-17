@@ -10,6 +10,7 @@ import org.cloudbus.cloudsim.core.CloudSim;
 
 import edu.boun.edgecloudsim.utils.ArrayUtils;
 
+import edu.boun.edgecloudsim.core.ExecutionTarget;
 import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.SimLogger;
@@ -19,10 +20,6 @@ import edu.boun.edgecloudsim.utils.TaskProperty;
  * 任务卸载引擎，负责使用RL进行任务卸载决策
  */
 public class TaskOffloadingEngine {
-    public static final int LOCAL_EXECUTION = 0;
-    public static final int CLOUD_EXECUTION = 1;
-    public static final int UAV_EXECUTION = 2;
-
     private SimManager simManager;
     private EnhancedPythonInterface pythonInterface;
     private StateActionManager stateActionManager;
@@ -82,13 +79,13 @@ public class TaskOffloadingEngine {
     /**
      * 获取卸载决策
      * @param task 任务
-     * @return 卸载决策（目标UAV的ID）
+     * @return typed execution target
      */
-    public int getOffloadingDecision(UAV.Task task) {
+    public ExecutionTarget getOffloadingTarget(UAV.Task task) {
         // 确保状态动作管理器已初始化
         if (stateActionManager == null) {
             SimLogger.printLine("警告: StateActionManager未初始化，使用默认决策");
-            return getDefaultDecision();
+            return getDefaultTarget();
         }
         
         // 生成当前状态
@@ -97,7 +94,7 @@ public class TaskOffloadingEngine {
         if (pythonInterface != null && pythonInterface.isConnected()) {
             // 使用RL模型获取动作
             try {
-                final int[] decision = {-1};
+                final ExecutionTarget[] decision = {null};
                 final boolean[] completed = {false};
                 
                 pythonInterface.getActionAsync(state, new EnhancedPythonInterface.Callback<double[]>() {
@@ -108,7 +105,7 @@ public class TaskOffloadingEngine {
                         
                         // 在这个简化的实现中，我们只取第一个动作作为卸载目标
                         if (actions.size() > 0) {
-                            decision[0] = (int) actions.get(0).get("uavId");
+                            decision[0] = ExecutionTarget.uav((int) actions.get(0).get("uavId"));
                         }
                         
                         completed[0] = true;
@@ -117,7 +114,7 @@ public class TaskOffloadingEngine {
                     @Override
                     public void onFailure(Exception e) {
                         SimLogger.printLine("获取RL动作失败: " + e.getMessage());
-                        decision[0] = getDefaultDecision();
+                        decision[0] = getDefaultTarget();
                         completed[0] = true;
                     }
                 });
@@ -136,35 +133,44 @@ public class TaskOffloadingEngine {
                 
                 if (!completed[0]) {
                     SimLogger.printLine("获取RL动作超时，使用默认决策");
-                    return getDefaultDecision();
+                    return getDefaultTarget();
                 }
-                
-                return decision[0];
+
+                return decision[0] != null ? decision[0] : getDefaultTarget();
             } catch (Exception e) {
                 SimLogger.printLine("使用RL进行卸载决策时出错: " + e.getMessage());
-                return getDefaultDecision();
+                return getDefaultTarget();
             }
         } else {
             // 使用默认策略
-            return getDefaultDecision();
+            return getDefaultTarget();
         }
+    }
+
+    /**
+     * Compatibility adapter for callers that still consume EdgeCloudSim's
+     * legacy integer destination IDs.
+     */
+    @Deprecated
+    public int getOffloadingDecision(UAV.Task task) {
+        return getOffloadingTarget(task).toLegacyDeviceId();
     }
     
     /**
      * 获取默认卸载决策（最简单的负载均衡）
-     * @return 目标UAV的ID
+     * @return typed target; local execution is explicit when no UAV is usable
      */
-    private int getDefaultDecision() {
+    private ExecutionTarget getDefaultTarget() {
         UAVManager uavManager = simManager.getUAVManager();
         if (uavManager == null) {
             SimLogger.printLine("警告: UAVManager为空，返回本地执行");
-            return LOCAL_EXECUTION;
+            return ExecutionTarget.local();
         }
         
         List<UAV> uavList = uavManager.getUAVs();
         if (uavList == null || uavList.isEmpty()) {
             SimLogger.printLine("警告: UAV列表为空，返回本地执行");
-            return LOCAL_EXECUTION;
+            return ExecutionTarget.local();
         }
         
         // 修改选择策略：考虑处理能力、任务队列长度和能量
@@ -189,11 +195,11 @@ public class TaskOffloadingEngine {
         }
         
         if (bestUavId >= 0) {
-            return bestUavId;
+            return ExecutionTarget.uav(bestUavId);
         }
         
         // 如果没有合适的UAV，返回本地执行
-        return LOCAL_EXECUTION;
+        return ExecutionTarget.local();
     }
     
     /**
@@ -216,7 +222,14 @@ public class TaskOffloadingEngine {
         UAV.Task task = new UAV.Task(String.valueOf(taskId), taskLength);
         
         // 获取卸载决策
-        int targetUavId = getOffloadingDecision(task);
+        ExecutionTarget target = getOffloadingTarget(task);
+
+        if (target.getType() != ExecutionTarget.Type.UAV) {
+            SimLogger.printLine("遗留UAV引擎无法执行目标 " + target + "，任务被拒绝");
+            rejectedTaskCount.incrementAndGet();
+            return;
+        }
+        int targetUavId = target.getResourceId();
         
         // 提交任务到UAV
         UAVManager uavManager = simManager.getUAVManager();

@@ -16,6 +16,7 @@ package edu.boun.edgecloudsim.edge_orchestrator;
 import org.cloudbus.cloudsim.Vm;
 import org.cloudbus.cloudsim.core.SimEntity;
 
+import edu.boun.edgecloudsim.core.ExecutionTarget;
 import edu.boun.edgecloudsim.edge_client.Task;
 
 public abstract class EdgeOrchestrator extends SimEntity{
@@ -44,6 +45,15 @@ public abstract class EdgeOrchestrator extends SimEntity{
 	 * decides where to offload
 	 */
 	public abstract int getDeviceToOffload(Task task);
+
+	/**
+	 * Typed form of the offloading decision. Existing orchestrators can keep
+	 * implementing the legacy integer method while new implementations avoid
+	 * conflating execution kinds with concrete resource identifiers.
+	 */
+	public ExecutionTarget getExecutionTarget(Task task) {
+		return ExecutionTarget.fromLegacyDeviceId(getDeviceToOffload(task));
+	}
 	
 	/*
 	 * returns proper VM from the edge orchestrator point of view

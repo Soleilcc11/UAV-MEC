@@ -23,6 +23,7 @@ public class GymDecisionCoordinator {
     private Task activeTask;
     private Decision activeDecision;
     private JSONObject pendingRewardComponents;
+    private JSONObject pendingPhysicalMetrics;
     private boolean initialDecisionReady;
     private boolean stepResultReady;
     private boolean terminated;
@@ -126,13 +127,20 @@ public class GymDecisionCoordinator {
                 manager.getUAVManager().getUAVs().size()
                         * manager.getSimulationSettings().getUAVMaxEnergy());
 
+        int constraintViolations = boundaryDelta
+                + (activeDecision.constraintViolation ? 1 : 0);
         pendingRewardComponents = new JSONObject()
                 .put("success", success ? 1.0 : 0.0)
                 .put("latency_ratio", latencySeconds / activeDecision.deadlineSeconds)
                 .put("ue_energy_ratio", activeDecision.ueEnergyJoules / 10.0)
                 .put("uav_energy_ratio", uavEnergy / uavBudget)
-                .put("constraint_violations",
-                        activeDecision.constraintViolation || boundaryDelta > 0 ? 1.0 : 0.0);
+                .put("constraint_violations", constraintViolations > 0 ? 1.0 : 0.0);
+        pendingPhysicalMetrics = rawPhysicalMetrics(
+                latencySeconds,
+                activeDecision.deadlineSeconds,
+                activeDecision.ueEnergyJoules,
+                uavEnergy,
+                constraintViolations);
         activeTask = null;
         activeDecision = null;
         settledTaskCount++;
@@ -168,13 +176,16 @@ public class GymDecisionCoordinator {
         JSONObject reward = pendingRewardComponents == null
                 ? zeroRewardComponents()
                 : pendingRewardComponents;
+        JSONObject metrics = pendingPhysicalMetrics == null
+                ? rawPhysicalMetrics(0.0, 0.0, 0.0, 0.0, 0)
+                : pendingPhysicalMetrics;
+        metrics = withEpisodeProgress(metrics, settledTaskCount, totalTaskCount,
+                Math.max(lastSimulationTime, CloudSim.clock()));
         StepResult result = new StepResult(
                 buildObservation(), reward, terminated, truncated,
-                new JSONObject()
-                        .put("settled_tasks", settledTaskCount)
-                        .put("total_tasks", totalTaskCount)
-                        .put("simulation_time", Math.max(lastSimulationTime, CloudSim.clock())));
+                metrics);
         pendingRewardComponents = null;
+        pendingPhysicalMetrics = null;
         stepResultReady = false;
         return result;
     }
@@ -318,6 +329,24 @@ public class GymDecisionCoordinator {
         return new JSONObject().put("success", 0.0).put("latency_ratio", 0.0)
                 .put("ue_energy_ratio", 0.0).put("uav_energy_ratio", 0.0)
                 .put("constraint_violations", 0.0);
+    }
+
+    static JSONObject rawPhysicalMetrics(double latencySeconds, double deadlineSeconds,
+            double ueEnergyJoules, double uavEnergyJoules, int constraintViolations) {
+        return new JSONObject()
+                .put("latency_seconds", Math.max(0.0, latencySeconds))
+                .put("deadline_seconds", Math.max(0.0, deadlineSeconds))
+                .put("ue_energy_joules", Math.max(0.0, ueEnergyJoules))
+                .put("uav_energy_joules", Math.max(0.0, uavEnergyJoules))
+                .put("constraint_violations", Math.max(0, constraintViolations));
+    }
+
+    static JSONObject withEpisodeProgress(JSONObject physicalMetrics, int settledTasks,
+            int totalTasks, double simulationTime) {
+        return physicalMetrics
+                .put("settled_tasks", Math.max(0, settledTasks))
+                .put("total_tasks", Math.max(0, totalTasks))
+                .put("simulation_time", Math.max(0.0, simulationTime));
     }
 
     private double maxColumn(double[][] table, int column) {

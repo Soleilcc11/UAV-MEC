@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict, dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -13,6 +14,15 @@ import numpy as np
 
 from .backend import JavaGymBridgeBackend
 from .contract import UAVMECGymEnv
+
+
+PHYSICAL_STEP_METRICS = (
+    "latency_seconds",
+    "deadline_seconds",
+    "ue_energy_joules",
+    "uav_energy_joules",
+    "constraint_violations",
+)
 
 
 class Policy(Protocol):
@@ -89,6 +99,121 @@ class EpisodeResult:
     simulation_time: float
     successful_tasks: int
     reward_component_sums: dict[str, float]
+    physical_metric_sums: dict[str, float] = field(default_factory=dict)
+    physical_metric_means: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MetricSummary:
+    count: int
+    mean: float
+    std: float
+    ci95_lower: float
+    ci95_upper: float
+
+
+@dataclass(frozen=True)
+class PairedSeedSummary:
+    """Candidate-minus-reference differences on the exact same seed set."""
+
+    metric: str
+    reference_policy: str
+    candidate_policy: str
+    differences_by_seed: dict[int, float]
+    statistics: MetricSummary
+
+
+EpisodeMetric = str | Callable[[EpisodeResult], float]
+
+
+def summarize_values(values: Iterable[float]) -> MetricSummary:
+    """Return mean, sample standard deviation, and a normal 95% CI."""
+
+    samples = np.asarray(list(values), dtype=np.float64)
+    if samples.ndim != 1 or samples.size == 0:
+        raise ValueError("At least one scalar value is required")
+    if not np.isfinite(samples).all():
+        raise ValueError("Summary values must be finite")
+    mean = float(np.mean(samples))
+    std = float(np.std(samples, ddof=1)) if samples.size > 1 else 0.0
+    margin = 1.96 * std / float(np.sqrt(samples.size))
+    return MetricSummary(
+        count=int(samples.size),
+        mean=mean,
+        std=std,
+        ci95_lower=mean - margin,
+        ci95_upper=mean + margin,
+    )
+
+
+def summarize_episode_metric(
+    results: Iterable[EpisodeResult], metric: EpisodeMetric = "total_reward"
+) -> MetricSummary:
+    return summarize_values(_metric_value(result, metric) for result in results)
+
+
+def summarize_paired_seed_differences(
+    reference_results: Iterable[EpisodeResult],
+    candidate_results: Iterable[EpisodeResult],
+    metric: EpisodeMetric = "total_reward",
+) -> PairedSeedSummary:
+    """Summarize candidate-reference deltas after enforcing exact seed pairing."""
+
+    references = list(reference_results)
+    candidates = list(candidate_results)
+    reference_by_seed = _results_by_seed(references, "reference")
+    candidate_by_seed = _results_by_seed(candidates, "candidate")
+    if set(reference_by_seed) != set(candidate_by_seed):
+        raise ValueError("Reference and candidate results must contain identical seeds")
+    differences = {
+        seed: _metric_value(candidate_by_seed[seed], metric)
+        - _metric_value(reference_by_seed[seed], metric)
+        for seed in sorted(reference_by_seed)
+    }
+    return PairedSeedSummary(
+        metric=_metric_name(metric),
+        reference_policy=_single_policy_name(references, "reference"),
+        candidate_policy=_single_policy_name(candidates, "candidate"),
+        differences_by_seed=differences,
+        statistics=summarize_values(differences.values()),
+    )
+
+
+def _metric_value(result: EpisodeResult, metric: EpisodeMetric) -> float:
+    if callable(metric):
+        return float(metric(result))
+    if metric in result.physical_metric_sums:
+        return float(result.physical_metric_sums[metric])
+    if metric.startswith("physical_metric_sums."):
+        return float(result.physical_metric_sums[metric.split(".", 1)[1]])
+    if metric.startswith("physical_metric_means."):
+        return float(result.physical_metric_means[metric.split(".", 1)[1]])
+    value = getattr(result, metric, None)
+    if value is None or isinstance(value, (dict, bool)):
+        raise ValueError(f"Episode metric is not numeric: {metric}")
+    return float(value)
+
+
+def _metric_name(metric: EpisodeMetric) -> str:
+    return metric if isinstance(metric, str) else getattr(metric, "__name__", "custom")
+
+
+def _results_by_seed(
+    results: list[EpisodeResult], label: str
+) -> dict[int, EpisodeResult]:
+    if not results:
+        raise ValueError(f"At least one {label} result is required")
+    by_seed = {result.seed: result for result in results}
+    if len(by_seed) != len(results):
+        raise ValueError(f"Duplicate seeds in {label} results")
+    return by_seed
+
+
+def _single_policy_name(results: list[EpisodeResult], label: str) -> str:
+    names = {result.policy for result in results}
+    if len(names) != 1:
+        raise ValueError(f"Paired {label} results must contain one policy")
+    return next(iter(names))
 
 
 def evaluate_policy(env: gym.Env, policy: Policy, seeds: list[int]) -> list[EpisodeResult]:
@@ -101,6 +226,7 @@ def evaluate_policy(env: gym.Env, policy: Policy, seeds: list[int]) -> list[Epis
         terminated = truncated = False
         info: dict[str, Any] = {}
         component_sums: dict[str, float] = {}
+        physical_metric_sums = {key: 0.0 for key in PHYSICAL_STEP_METRICS}
         successful_tasks = 0
         while not (terminated or truncated):
             observation, reward, terminated, truncated, info = env.step(
@@ -110,7 +236,16 @@ def evaluate_policy(env: gym.Env, policy: Policy, seeds: list[int]) -> list[Epis
             steps += 1
             for key, value in info["reward_components"].items():
                 component_sums[key] = component_sums.get(key, 0.0) + float(value)
+            for key in PHYSICAL_STEP_METRICS:
+                value = float(info[key])
+                if not np.isfinite(value) or value < 0.0:
+                    raise ValueError(f"Invalid physical step metric {key}: {value}")
+                physical_metric_sums[key] += value
             successful_tasks += int(info["reward_components"]["success"] > 0.5)
+        physical_metric_means = {
+            key: value / steps if steps else 0.0
+            for key, value in physical_metric_sums.items()
+        }
         results.append(EpisodeResult(
             policy=policy.name,
             seed=seed,
@@ -123,6 +258,8 @@ def evaluate_policy(env: gym.Env, policy: Policy, seeds: list[int]) -> list[Epis
             simulation_time=float(info["simulation_time"]),
             successful_tasks=successful_tasks,
             reward_component_sums=component_sums,
+            physical_metric_sums=physical_metric_sums,
+            physical_metric_means=physical_metric_means,
         ))
     return results
 

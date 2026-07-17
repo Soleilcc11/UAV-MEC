@@ -50,7 +50,7 @@ public class TaskOffloadingEngine {
         
         // 初始化状态动作管理器和奖励计算器
         this.stateActionManager = new StateActionManager(simManager);
-        this.rewardCalculator = new RewardCalculator();
+        this.rewardCalculator = new RewardCalculator(simManager);
         
         // 连接到Python RL服务器
         try {
@@ -325,6 +325,11 @@ public class TaskOffloadingEngine {
         double[] action = stateActionManager.getLastAction();
         double[] nextState = stateActionManager.generateState();
         double reward = rewardCalculator.calculateReward(latency, (long) task.getTotalMI());
+
+        if (state == null || action == null) {
+            SimLogger.printLine("跳过训练：当前任务没有完整的状态/动作轨迹");
+            return;
+        }
         
         // 异步训练RL模型
         pythonInterface.trainAsync(state, action, reward, nextState, false, 
@@ -434,69 +439,4 @@ public class TaskOffloadingEngine {
         SimLogger.printLine("紧急恢复: 清除了 " + activeTasks + " 个活动任务");
     }
     
-    /**
-     * 状态动作管理器内部类
-     */
-    public class StateActionManager {
-        private SimManager simManager;
-        private double[] lastState;
-        private double[] lastAction;
-        
-        public StateActionManager(SimManager simManager) {
-            this.simManager = simManager;
-            this.lastState = null;
-            this.lastAction = null;
-        }
-        
-        public double[] generateState() {
-            // 简化版：生成一个基本状态向量
-            double[] state = new double[]{
-                simManager.getSimulationTime(),
-                getCompletedTaskCount(),
-                getTotalTaskCount(),
-                getRejectedTaskCount()
-            };
-            
-            // 保存最后生成的状态
-            this.lastState = state.clone();
-            
-            return state;
-        }
-        
-        public List<Map<String, Object>> parseOffloadingDecision(double[] action) {
-            // 简化版：将动作向量解析为决策列表
-            List<Map<String, Object>> decisions = new ArrayList<>();
-            Map<String, Object> decision = new HashMap<>();
-            
-            // 简单地将第一个值作为UAV ID
-            int uavId = action.length > 0 ? (int)Math.abs(action[0] % simManager.getUAVManager().getUAVs().size()) : 0;
-            
-            decision.put("uavId", uavId);
-            decisions.add(decision);
-            
-            // 保存最后的动作
-            this.lastAction = action.clone();
-            
-            return decisions;
-        }
-        
-        public double[] getLastState() {
-            return lastState;
-        }
-        
-        public double[] getLastAction() {
-            return lastAction;
-        }
-    }
-    
-    /**
-     * 奖励计算器内部类
-     */
-    public class RewardCalculator {
-        public double calculateReward(long latency, long totalMI) {
-            // 简化版：基于延迟和计算量的反比例奖励
-            // 延迟越低，奖励越高
-            return 1000.0 / (1.0 + latency);
-        }
-    }
 }

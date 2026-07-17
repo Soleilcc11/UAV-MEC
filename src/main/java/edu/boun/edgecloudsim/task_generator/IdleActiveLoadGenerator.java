@@ -3,6 +3,8 @@ import edu.boun.edgecloudsim.utils.ArrayUtils;
 import java.util.ArrayList;
 
 import org.apache.commons.math3.distribution.ExponentialDistribution;
+import org.apache.commons.math3.random.RandomGenerator;
+import org.apache.commons.math3.random.Well19937c;
 
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.utils.TaskProperty;
@@ -23,6 +25,7 @@ public class IdleActiveLoadGenerator extends LoadGeneratorModel {
         // 创建随机数生成器，用于任务输入大小、输出大小和任务长度
         int taskLookUpTableLength = ArrayUtils.length(SimSettings.getInstance().getTaskLookUpTable());
         ExponentialDistribution[][] expRngList = new ExponentialDistribution[taskLookUpTableLength][3];
+        RandomGenerator distributionRng = new Well19937c(SimSettings.getInstance().getSimulationSeed());
         
         // 为每种任务类型创建随机数生成器
         for(int i=0; i<taskLookUpTableLength; i++) {
@@ -30,9 +33,9 @@ public class IdleActiveLoadGenerator extends LoadGeneratorModel {
                 continue;
             
             // 为任务输入大小、输出大小和长度创建指数分布
-            expRngList[i][0] = new ExponentialDistribution(ArrayUtils.getDoubleValueFromTable(SimSettings.getInstance().getTaskLookUpTable(), i, 5));
-            expRngList[i][1] = new ExponentialDistribution(ArrayUtils.getDoubleValueFromTable(SimSettings.getInstance().getTaskLookUpTable(), i, 6));
-            expRngList[i][2] = new ExponentialDistribution(ArrayUtils.getDoubleValueFromTable(SimSettings.getInstance().getTaskLookUpTable(), i, 7));
+            expRngList[i][0] = new ExponentialDistribution(distributionRng, ArrayUtils.getDoubleValueFromTable(SimSettings.getInstance().getTaskLookUpTable(), i, 5));
+            expRngList[i][1] = new ExponentialDistribution(distributionRng, ArrayUtils.getDoubleValueFromTable(SimSettings.getInstance().getTaskLookUpTable(), i, 6));
+            expRngList[i][2] = new ExponentialDistribution(distributionRng, ArrayUtils.getDoubleValueFromTable(SimSettings.getInstance().getTaskLookUpTable(), i, 7));
         }
         
         // 为每个移动设备分配任务类型
@@ -70,7 +73,7 @@ public class IdleActiveLoadGenerator extends LoadGeneratorModel {
             int deviceTasks = 0; // 该设备生成的任务数量计数器
             
             // 使用泊松分布生成任务
-            ExponentialDistribution rng = new ExponentialDistribution(poissonMean);
+            ExponentialDistribution rng = new ExponentialDistribution(distributionRng, poissonMean);
             
             // 在模拟时间内生成任务
             while(virtualTime < simulationTime) {

@@ -40,14 +40,15 @@ public class RewardCalculator {
         // 延迟组件（延迟越低，奖励越高）
         double latencyReward = calculateLatencyReward(latency);
         
-        // 能量组件（剩余能量越高，奖励越高）
-        double energyReward = calculateEnergyReward();
+        // 能量组件（消耗越低越好）
+        double energyReward = 1.0 - calculateEnergyPenalty();
         
         // 负载均衡组件（任务分配均匀，奖励越高）
         double loadBalanceReward = calculateLoadBalanceReward();
         
-        // 任务完成组件（完成率越高，奖励越高）
-        double completionReward = calculateCompletionReward();
+        // 成功完成任务时的固定正奖励。
+        double successReward = latency >= 0 ? 1.0 : 0.0;
+        double completionReward = 0.5 * successReward + 0.5 * calculateConstraintReward();
         
         // 总奖励
         double totalReward = 
@@ -56,7 +57,7 @@ public class RewardCalculator {
             loadBalanceWeight * loadBalanceReward +
             completionWeight * completionReward;
         
-        return totalReward;
+        return Math.max(-1.0, Math.min(1.0, totalReward));
     }
     
     /**
@@ -75,22 +76,19 @@ public class RewardCalculator {
      * 计算能量奖励
      * @return 能量奖励
      */
-    private double calculateEnergyReward() {
-        // 获取所有UAV的平均能量水平
+    private double calculateEnergyPenalty() {
         UAVManager uavManager = simManager.getUAVManager();
-        double totalEnergy = 0.0;
+        if (uavManager == null || uavManager.getUAVs().isEmpty()) {
+            return 0.0;
+        }
+        double consumedEnergy = 0.0;
         double maxEnergy = simManager.getSimulationSettings().getUAVMaxEnergy();
         int uavCount = uavManager.getUAVs().size();
         
         for (UAV uav : uavManager.getUAVs()) {
-            totalEnergy += uav.getEnergy();
+            consumedEnergy += uav.getTotalEnergyConsumed();
         }
-        
-        // 平均能量水平（0-1）
-        double averageEnergyLevel = totalEnergy / (uavCount * maxEnergy);
-        
-        // 返回平均能量水平作为奖励
-        return averageEnergyLevel;
+        return Math.max(0.0, Math.min(1.0, consumedEnergy / (uavCount * maxEnergy)));
     }
     
     /**
@@ -130,28 +128,15 @@ public class RewardCalculator {
         double maxStdDev = 10.0; // 假设最大可接受的标准差为10
         return Math.exp(-stdDev / maxStdDev);
     }
-    
-    /**
-     * 计算任务完成奖励
-     * @return 任务完成奖励
-     */
-    private double calculateCompletionReward() {
-        // 获取任务完成率
-        TaskOffloadingEngine offloadingEngine = (TaskOffloadingEngine) simManager.getTaskOffloadingEngine();
-        
-        if (offloadingEngine == null) {
-            return 0.0;
+
+    private double calculateConstraintReward() {
+        UAVManager manager = simManager.getUAVManager();
+        if (manager == null || manager.getMovementCommandCount() == 0) {
+            return 1.0;
         }
-        
-        int completed = offloadingEngine.getCompletedTaskCount();
-        int total = offloadingEngine.getTotalTaskCount();
-        
-        if (total == 0) {
-            return 1.0; // 没有任务时，完成率为100%
-        }
-        
-        // 返回完成率作为奖励
-        return (double) completed / total;
+        double violationRate = manager.getBoundaryConstraintCount()
+                / (double) manager.getMovementCommandCount();
+        return Math.max(0.0, 1.0 - violationRate);
     }
     
     /**

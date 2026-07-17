@@ -11,6 +11,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.File;
 import edu.boun.edgecloudsim.core.SimSettingsExtensions;
+import edu.boun.edgecloudsim.utils.SimUtils;
 
 
 
@@ -368,7 +369,7 @@ public class SimSettings {
      */
     public double getRandomPositionX() {
         double[] space = getSimulationSpace();
-        return Math.random() * space[0];
+        return SimUtils.getRandomDoubleNumber(0.0, space[0]);
     }
     
     /**
@@ -376,7 +377,7 @@ public class SimSettings {
      */
     public double getRandomPositionY() {
         double[] space = getSimulationSpace();
-        return Math.random() * space[1];
+        return SimUtils.getRandomDoubleNumber(0.0, space[1]);
     }
     
     /**

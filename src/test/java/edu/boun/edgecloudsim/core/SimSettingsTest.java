@@ -22,5 +22,9 @@ class SimSettingsTest {
         assertEquals("SMOKE_TASK", settings.getTaskName(0));
         assertEquals("SINGLE_TIER", settings.getSimulationScenarios()[0]);
         assertEquals("RANDOM_FIT", settings.getOrchestratorPolicies()[0]);
+        assertEquals(42L, settings.getSimulationSeed());
+        assertEquals(50.0, settings.getUAVFlightPower());
+        assertEquals(20.0, settings.getUAVHoverPower());
+        assertEquals(0.001, settings.getUAVComputeEnergyPerMi());
     }
 }

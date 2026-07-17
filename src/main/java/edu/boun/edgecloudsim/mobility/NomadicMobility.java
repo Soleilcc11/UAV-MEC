@@ -18,6 +18,8 @@ import java.util.TreeMap;
 import java.util.Map.Entry;
 import edu.boun.edgecloudsim.utils.ArrayUtils;
 import org.apache.commons.math3.distribution.ExponentialDistribution;
+import org.apache.commons.math3.random.RandomGenerator;
+import org.apache.commons.math3.random.Well19937c;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -43,6 +45,7 @@ public class NomadicMobility extends MobilityModel {
 		treeMapArray = new ArrayList<TreeMap<Double, Location>>();
     
 		ExponentialDistribution[] expRngList = new ExponentialDistribution[SimSettings.getInstance().getNumOfEdgeDatacenters()];
+		RandomGenerator mobilityRng = new Well19937c(SimSettings.getInstance().getSimulationSeed() + 1);
 		
 		//create random number generator for each place
 		Document doc = SimSettings.getInstance().getEdgeDevicesDocument();
@@ -59,7 +62,7 @@ public class NomadicMobility extends MobilityModel {
 			Object mobilityTable = SimSettingsExtensions.getMobilityLookUpTable(SimSettings.getInstance());
 			double mobilityValue = ArrayUtils.getDoubleValueFromTable(mobilityTable, placeTypeIndex, 0);
 		
-			expRngList[i] = new ExponentialDistribution(mobilityValue);
+			expRngList[i] = new ExponentialDistribution(mobilityRng, mobilityValue);
 		}
 	
 		

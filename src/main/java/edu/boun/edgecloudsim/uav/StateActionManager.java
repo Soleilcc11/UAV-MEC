@@ -53,15 +53,13 @@ public class StateActionManager {
         
         if (useDynamicState) {
             // 动态状态包括：
-            // 1. 每个UAV的位置(x,y,z): 3维
-            // 2. 每个UAV的能量水平: 1维
-            // 3. 每个UAV的任务队列长度: 1维
-            // 4. 每个UAV的处理能力: 1维
-            // 5. 系统当前时间: 1维
-            dimension = numUavs * (3 + 1 + 1 + 1) + 1;
+            // Global: normalized time and active UAV network transfers.
+            // Per UAV: position (3), remaining energy, queue length,
+            // processing capacity, and cumulative energy consumption.
+            dimension = numUavs * 7 + 2;
         } else {
             // 简化的状态表示
-            dimension = numUavs * 4 + 1;
+            dimension = numUavs * 4 + 2;
         }
         
         return dimension;
@@ -79,8 +77,12 @@ public class StateActionManager {
         
         // 当前归一化的时间 (0-1)
         double currentTime = simManager.getSimulationTime();
-        double simulationLength = 3600; // 假设模拟时长为3600秒
-        state[index++] = currentTime / simulationLength;
+        double simulationLength = simManager.getSimulationSettings().getSimulationTime();
+        state[index++] = normalize(currentTime, simulationLength);
+        double activeTransfers = simManager.getNetworkModel() instanceof UAVMECNetworkModel
+                ? ((UAVMECNetworkModel) simManager.getNetworkModel()).getActiveUavTransferCount()
+                : 0.0;
+        state[index++] = normalize(activeTransfers, Math.max(1.0, uavList.size() * 2.0));
         
         // 获取每个UAV的状态信息
         for (UAV uav : uavList) {
@@ -88,22 +90,23 @@ public class StateActionManager {
             double[] position = uav.getPosition();
             double[] simSpace = simManager.getSimulationSettings().getSimulationSpace();
             
-            state[index++] = position[0] / simSpace[0];
-            state[index++] = position[1] / simSpace[1];
-            state[index++] = position[2] / simSpace[2];
+            state[index++] = normalize(position[0], simSpace[0]);
+            state[index++] = normalize(position[1], simSpace[1]);
+            state[index++] = normalize(position[2], simSpace[2]);
             
             // 归一化的能量水平 (0-1)
             double maxEnergy = simManager.getSimulationSettings().getUAVMaxEnergy();
-            state[index++] = uav.getEnergy() / maxEnergy;
+            state[index++] = normalize(uav.getEnergy(), maxEnergy);
             
             if (useDynamicState) {
                 // 归一化的任务队列长度
                 int maxQueueLength = 50; // 假设最大队列长度
-                state[index++] = uav.getTaskQueueLength() / (double) maxQueueLength;
+                state[index++] = normalize(uav.getTaskQueueLength(), maxQueueLength);
                 
                 // 归一化的处理能力
-                double maxProcessingCap = 1000; // 假设最大处理能力 (MIPS)
-                state[index++] = uav.getProcessingCapacity() / maxProcessingCap;
+                double maxProcessingCap = 2500;
+                state[index++] = normalize(uav.getProcessingCapacity(), maxProcessingCap);
+                state[index++] = normalize(uav.getTotalEnergyConsumed(), maxEnergy);
             }
         }
         
@@ -111,6 +114,13 @@ public class StateActionManager {
         this.lastState = state;
         
         return state;
+    }
+
+    private double normalize(double value, double maximum) {
+        if (maximum <= 0) {
+            return 0.0;
+        }
+        return Math.max(0.0, Math.min(1.0, value / maximum));
     }
     
     /**
@@ -146,9 +156,9 @@ public class StateActionManager {
             double[] simSpace = simManager.getSimulationSettings().getSimulationSpace();
             double maxMoveDistance = 10.0; // 假设UAV每步最大移动距离
             
-            double scaledMoveX = moveX * maxMoveDistance;
-            double scaledMoveY = moveY * maxMoveDistance;
-            double scaledMoveZ = moveZ * maxMoveDistance;
+            double scaledMoveX = clampAction(moveX) * maxMoveDistance;
+            double scaledMoveY = clampAction(moveY) * maxMoveDistance;
+            double scaledMoveZ = clampAction(moveZ) * maxMoveDistance;
             
             // 设置移动动作
             double[] moveDirection = new double[] {scaledMoveX, scaledMoveY, scaledMoveZ};
@@ -159,6 +169,10 @@ public class StateActionManager {
         }
         
         return actions;
+    }
+
+    private double clampAction(double value) {
+        return Math.max(-1.0, Math.min(1.0, value));
     }
     
     /**

@@ -24,6 +24,8 @@ public class UAVManager {
     private Random random;
     private AtomicInteger completedTasks;
     private Map<String, Task> activeEdgeTasks;
+    private int movementCommandCount;
+    private int boundaryConstraintCount;
     
     // 定义任务完成事件类型
     public static final int UAV_TASK_COMPLETED = 9999;
@@ -88,13 +90,22 @@ public class UAVManager {
             double[] moveDirection = (double[]) action.get("moveDirection");
             
             if (uavId >= 0 && uavId < uavList.size()) {
-                UAV uav = uavList.get(uavId);
-                double[] newPosition = uav.updatePosition(moveDirection);
-                
-                // 检查边界条件
-                enforceBoundaryConstraints(uav, newPosition);
+                moveUav(uavId, moveDirection);
             }
         }
+    }
+
+    public boolean moveUav(int uavId, double[] displacement) {
+        UAV uav = getUAV(uavId);
+        if (uav == null || displacement == null || displacement.length != 3) {
+            return false;
+        }
+        double[] newPosition = uav.updatePosition(displacement.clone());
+        movementCommandCount++;
+        if (enforceBoundaryConstraints(uav, newPosition)) {
+            boundaryConstraintCount++;
+        }
+        return true;
     }
     
     /**
@@ -232,12 +243,16 @@ public class UAVManager {
      * @param uav UAV对象
      * @param position 位置坐标
      */
-    private void enforceBoundaryConstraints(UAV uav, double[] position) {
+    private boolean enforceBoundaryConstraints(UAV uav, double[] position) {
         SimSettings simSettings = simManager.getSimulationSettings();
         double[] simSpace = simSettings.getSimulationSpace();
         double minHeight = simSettings.getUAVMinHeight();
         double maxHeight = simSettings.getUAVMaxHeight();
         
+        double originalX = position[0];
+        double originalY = position[1];
+        double originalZ = position[2];
+
         // X边界
         if (position[0] < 0) position[0] = 0;
         if (position[0] > simSpace[0]) position[0] = simSpace[0];
@@ -249,6 +264,7 @@ public class UAVManager {
         // Z边界（高度）
         if (position[2] < minHeight) position[2] = minHeight;
         if (position[2] > maxHeight) position[2] = maxHeight;
+        return originalX != position[0] || originalY != position[1] || originalZ != position[2];
     }
     
     /**
@@ -366,6 +382,14 @@ public class UAVManager {
 
     public int getActiveEdgeTaskCount() {
         return activeEdgeTasks.size();
+    }
+
+    public int getMovementCommandCount() {
+        return movementCommandCount;
+    }
+
+    public int getBoundaryConstraintCount() {
+        return boundaryConstraintCount;
     }
     
     /**

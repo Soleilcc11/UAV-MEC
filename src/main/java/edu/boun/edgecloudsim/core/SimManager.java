@@ -22,6 +22,7 @@ import edu.boun.edgecloudsim.uav.UAVMECScenarioFactory;
 import edu.boun.edgecloudsim.uav.UAVManager;
 import edu.boun.edgecloudsim.utils.SimLogger;
 import edu.boun.edgecloudsim.utils.TaskProperty;
+import edu.boun.edgecloudsim.utils.SimUtils;
 
 /** Coordinates the EdgeCloudSim components and UAV extensions. */
 public class SimManager extends SimEntity {
@@ -31,6 +32,7 @@ public class SimManager extends SimEntity {
     public static final int SUBMIT_EDGE_TASK = BASE_EVENT_ID + 1;
     public static final int PROCESS_UAV_TASKS = BASE_EVENT_ID + 2;
     public static final int SUBMIT_UAV_TASK = BASE_EVENT_ID + 3;
+    public static final int MOVE_UAV = BASE_EVENT_ID + 4;
     private static final double TERMINATION_EPSILON = 1e-9;
 
     private SimSettings simSettings;
@@ -48,6 +50,7 @@ public class SimManager extends SimEntity {
     private TaskOffloadingEngine taskOffloadingEngine;
     private PerformanceMonitor performanceMonitor;
     private final List<TaskProperty> pendingUavTasks = new ArrayList<>();
+    private final List<UavMovementCommand> pendingUavMovements = new ArrayList<>();
 
     private int numOfMobileDevice;
     private String simScenario;
@@ -93,6 +96,7 @@ public class SimManager extends SimEntity {
         this.submittedEdgeTaskCount = 0;
 
         try {
+            SimUtils.setSeed(simSettings.getSimulationSeed());
             loadGeneratorModel = scenarioFactory.getLoadGeneratorModel();
             mobilityModel = scenarioFactory.getMobilityModel();
             networkModel = scenarioFactory.getNetworkModel();
@@ -176,6 +180,13 @@ public class SimManager extends SimEntity {
                 }
                 break;
 
+            case MOVE_UAV:
+                if (uavManager != null && event.getData() instanceof UavMovementCommand) {
+                    UavMovementCommand command = (UavMovementCommand) event.getData();
+                    uavManager.moveUav(command.uavId, command.displacement);
+                }
+                break;
+
             default:
                 SimLogger.printLine("SimManager收到未知事件，标签: " + event.getTag());
                 break;
@@ -203,6 +214,10 @@ public class SimManager extends SimEntity {
             schedule(getId(), Math.max(0.0, task.getStartTime()), SUBMIT_UAV_TASK, task);
         }
         pendingUavTasks.clear();
+        for (UavMovementCommand command : pendingUavMovements) {
+            schedule(getId(), Math.max(0.0, command.time), MOVE_UAV, command);
+        }
+        pendingUavMovements.clear();
 
         if (uavManager != null) {
             schedule(getId(), 1.0, PROCESS_UAV_TASKS);
@@ -247,6 +262,25 @@ public class SimManager extends SimEntity {
     public void scheduleUavTask(TaskProperty task) {
         if (task != null) {
             pendingUavTasks.add(task);
+        }
+    }
+
+    public void scheduleUavMovement(double time, int uavId, double[] displacement) {
+        if (displacement == null || displacement.length != 3) {
+            throw new IllegalArgumentException("UAV displacement must contain x, y, and z");
+        }
+        pendingUavMovements.add(new UavMovementCommand(time, uavId, displacement.clone()));
+    }
+
+    private static final class UavMovementCommand {
+        private final double time;
+        private final int uavId;
+        private final double[] displacement;
+
+        private UavMovementCommand(double time, int uavId, double[] displacement) {
+            this.time = time;
+            this.uavId = uavId;
+            this.displacement = displacement;
         }
     }
 

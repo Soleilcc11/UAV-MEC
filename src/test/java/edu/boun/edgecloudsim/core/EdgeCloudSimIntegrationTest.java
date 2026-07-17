@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Test;
 
 import edu.boun.edgecloudsim.uav.UAVMECScenarioFactory;
 import edu.boun.edgecloudsim.uav.UAVMECNetworkModel;
+import edu.boun.edgecloudsim.uav.StateActionManager;
+import edu.boun.edgecloudsim.uav.RewardCalculator;
 import edu.boun.edgecloudsim.uav.TaskOffloadingOrchestrator;
 import edu.boun.edgecloudsim.edge_client.Task;
 import edu.boun.edgecloudsim.edge_orchestrator.EdgeOrchestrator;
@@ -61,6 +63,9 @@ class EdgeCloudSimIntegrationTest {
         };
         SimManager manager = SimManager.getInstance();
         manager.initialize(factory, 1, "SINGLE_TIER", "RANDOM_FIT");
+        for (int i = 0; i < 9; i++) {
+            manager.scheduleUavMovement(0.5, 0, new double[] {0.0, 0.0, -1000.0});
+        }
 
         CloudSim.startSimulation();
 
@@ -86,5 +91,19 @@ class EdgeCloudSimIntegrationTest {
         assertEquals(0, networkModel.getActiveUavTransferCount());
         assertTrue(manager.getUAVManager().getUAVs().stream()
                 .allMatch(uav -> uav.getTotalEnergyConsumed() > 0.0));
+        assertEquals(9, manager.getUAVManager().getMovementCommandCount());
+        assertTrue(manager.getUAVManager().getBoundaryConstraintCount() > 0);
+        assertTrue(manager.getUAVManager().getUAV(0).getFlightEnergyConsumed() > 0.0);
+
+        StateActionManager stateActionManager = new StateActionManager(manager);
+        double[] state = stateActionManager.generateState();
+        assertEquals(16, state.length);
+        for (double value : state) {
+            assertTrue(value >= 0.0 && value <= 1.0);
+        }
+
+        RewardCalculator rewardCalculator = new RewardCalculator(manager);
+        assertTrue(rewardCalculator.calculateReward(100.0, 1000.0)
+                > rewardCalculator.calculateReward(5000.0, 1000.0));
     }
 }

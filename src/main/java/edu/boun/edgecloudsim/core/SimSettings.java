@@ -429,6 +429,10 @@ public class SimSettings {
     public long getSimulationSeed() {
         return Long.parseLong(configFile.getProperty("simulation_seed", "42"));
     }
+
+    public void setSimulationSeed(long seed) {
+        configFile.setProperty("simulation_seed", Long.toString(seed));
+    }
     
     /**
      * 获取UAV通信路径损耗参数

@@ -195,6 +195,7 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 					networkModel.downloadFinished(task.getSubmittedLocation(), SimSettings.GENERIC_EDGE_DEVICE_ID);
 				
 				SimLogger.getInstance().taskEnded(task.getCloudletId(), CloudSim.clock());
+				SimManager.getInstance().notifyGymTaskSettled(task);
 				break;
 			}
 			default:
@@ -205,6 +206,10 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 	}
 
 	public void submitTask(TaskProperty edgeTask) {
+		submitTask(edgeTask, null);
+	}
+
+	public Task submitTask(TaskProperty edgeTask, ExecutionTarget forcedTarget) {
 		
 		NetworkModel networkModel = SimManager.getInstance().getNetworkModel();
 		
@@ -225,7 +230,9 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 				(int)task.getCloudletFileSize(),
 				(int)task.getCloudletOutputSize());
 
-		ExecutionTarget target = SimManager.getInstance().getEdgeOrchestrator().getExecutionTarget(task);
+		ExecutionTarget target = forcedTarget != null
+				? forcedTarget
+				: SimManager.getInstance().getEdgeOrchestrator().getExecutionTarget(task);
 		task.setExecutionTarget(target);
 		int nextHopId = target.toLegacyDeviceId();
 
@@ -285,6 +292,7 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 			SimLogger.getInstance().rejectedDueToVMCapacity(
 					task.getCloudletId(), CloudSim.clock(), SimSettings.VM_TYPES.MOBILE_VM.ordinal());
 		}
+		return task;
 	}
 
 	/** Called by UAVManager when an EdgeCloudSim task finishes on a UAV. */

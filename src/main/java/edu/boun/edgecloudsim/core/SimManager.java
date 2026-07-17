@@ -20,6 +20,7 @@ import edu.boun.edgecloudsim.uav.PerformanceMonitor;
 import edu.boun.edgecloudsim.uav.TaskOffloadingEngine;
 import edu.boun.edgecloudsim.uav.UAVMECScenarioFactory;
 import edu.boun.edgecloudsim.uav.UAVManager;
+import edu.boun.edgecloudsim.uav.GymDecisionCoordinator;
 import edu.boun.edgecloudsim.utils.SimLogger;
 import edu.boun.edgecloudsim.utils.TaskProperty;
 import edu.boun.edgecloudsim.utils.SimUtils;
@@ -33,6 +34,7 @@ public class SimManager extends SimEntity {
     public static final int PROCESS_UAV_TASKS = BASE_EVENT_ID + 2;
     public static final int SUBMIT_UAV_TASK = BASE_EVENT_ID + 3;
     public static final int MOVE_UAV = BASE_EVENT_ID + 4;
+    public static final int APPLY_GYM_ACTION = BASE_EVENT_ID + 5;
     private static final double TERMINATION_EPSILON = 1e-9;
 
     private SimSettings simSettings;
@@ -58,6 +60,7 @@ public class SimManager extends SimEntity {
     private boolean componentsInitialized;
     private int scheduledEdgeTaskCount;
     private int submittedEdgeTaskCount;
+    private GymDecisionCoordinator gymCoordinator;
 
     private SimManager() {
         super("SimManager");
@@ -75,6 +78,13 @@ public class SimManager extends SimEntity {
             instance = new SimManager();
         }
         return instance;
+    }
+
+    public static synchronized void resetInstance() {
+        if (CloudSim.running()) {
+            throw new IllegalStateException("Cannot reset SimManager while CloudSim is running");
+        }
+        instance = null;
     }
 
     public void initialize(Object config) {
@@ -158,7 +168,11 @@ public class SimManager extends SimEntity {
             case SUBMIT_EDGE_TASK:
                 if (mobileDeviceManager != null && event.getData() instanceof TaskProperty) {
                     submittedEdgeTaskCount++;
-                    mobileDeviceManager.submitTask((TaskProperty) event.getData());
+                    if (gymCoordinator != null) {
+                        gymCoordinator.onTaskArrival((TaskProperty) event.getData());
+                    } else {
+                        mobileDeviceManager.submitTask((TaskProperty) event.getData());
+                    }
                 }
                 break;
 
@@ -187,6 +201,24 @@ public class SimManager extends SimEntity {
                 }
                 break;
 
+            case APPLY_GYM_ACTION:
+                if (gymCoordinator != null
+                        && event.getData() instanceof GymDecisionCoordinator.Decision) {
+                    GymDecisionCoordinator.Decision decision =
+                            (GymDecisionCoordinator.Decision) event.getData();
+                    double[][] movements = decision.getMovements();
+                    for (int i = 0; i < movements.length; i++) {
+                        uavManager.moveUav(i, movements[i]);
+                    }
+                    if (mobileDeviceManager instanceof edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager) {
+                        edu.boun.edgecloudsim.edge_client.Task task =
+                                ((edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager) mobileDeviceManager)
+                                        .submitTask(decision.getTask(), decision.getTarget());
+                        gymCoordinator.onTaskSubmitted(task, decision);
+                    }
+                }
+                break;
+
             default:
                 SimLogger.printLine("SimManager收到未知事件，标签: " + event.getTag());
                 break;
@@ -210,6 +242,9 @@ public class SimManager extends SimEntity {
             schedule(getId(), Math.max(0.0, task.getStartTime()), SUBMIT_EDGE_TASK, task);
             scheduledEdgeTaskCount++;
         }
+        if (gymCoordinator != null) {
+            gymCoordinator.setTotalTaskCount(scheduledEdgeTaskCount);
+        }
         for (TaskProperty task : pendingUavTasks) {
             schedule(getId(), Math.max(0.0, task.getStartTime()), SUBMIT_UAV_TASK, task);
         }
@@ -230,6 +265,9 @@ public class SimManager extends SimEntity {
     public void shutdownEntity() {
         if (taskOffloadingEngine != null) {
             taskOffloadingEngine.close();
+        }
+        if (gymCoordinator != null) {
+            gymCoordinator.onSimulationEnded();
         }
         SimLogger.printLine("SimManager关闭");
     }
@@ -258,6 +296,8 @@ public class SimManager extends SimEntity {
     public void setUAVManager(UAVManager uavManager) { this.uavManager = uavManager; }
     public void setTaskOffloadingEngine(TaskOffloadingEngine engine) { this.taskOffloadingEngine = engine; }
     public void setPerformanceMonitor(PerformanceMonitor monitor) { this.performanceMonitor = monitor; }
+    public void setGymCoordinator(GymDecisionCoordinator coordinator) { this.gymCoordinator = coordinator; }
+    public GymDecisionCoordinator getGymCoordinator() { return gymCoordinator; }
 
     public void scheduleUavTask(TaskProperty task) {
         if (task != null) {
@@ -270,6 +310,16 @@ public class SimManager extends SimEntity {
             throw new IllegalArgumentException("UAV displacement must contain x, y, and z");
         }
         pendingUavMovements.add(new UavMovementCommand(time, uavId, displacement.clone()));
+    }
+
+    public void applyGymDecision(GymDecisionCoordinator.Decision decision) {
+        CloudSim.send(getId(), getId(), 0.0, APPLY_GYM_ACTION, decision);
+    }
+
+    public void notifyGymTaskSettled(edu.boun.edgecloudsim.edge_client.Task task) {
+        if (gymCoordinator != null) {
+            gymCoordinator.onTaskSettled(task);
+        }
     }
 
     private static final class UavMovementCommand {

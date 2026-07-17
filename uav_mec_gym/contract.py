@@ -48,6 +48,9 @@ class UAVMECGymEnv(gym.Env[dict[str, np.ndarray], dict[str, Any]]):
             raise ValueError("number_of_uavs must be positive")
         self.number_of_uavs = number_of_uavs
         self.backend = backend
+        backend_uav_count = getattr(backend, "number_of_uavs", number_of_uavs)
+        if backend_uav_count != number_of_uavs:
+            raise ValueError("Backend UAV count does not match the Gymnasium environment")
         target_count = 3 + number_of_uavs
         self.action_space = spaces.Dict(
             {

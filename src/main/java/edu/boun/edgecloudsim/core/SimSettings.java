@@ -188,6 +188,10 @@ public class SimSettings {
         copyTag(settingsDoc, "num_of_uavs", "num_of_uavs");
         copyTag(settingsDoc, "uav_max_energy", "uav_max_energy");
         copyTag(settingsDoc, "uav_initial_height", "uav_initial_height");
+        copyTag(settingsDoc, "simulation_seed", "simulation_seed");
+        copyTag(settingsDoc, "uav_flight_power", "uav_flight_power");
+        copyTag(settingsDoc, "uav_hover_power", "uav_hover_power");
+        copyTag(settingsDoc, "uav_compute_energy_per_mi", "uav_compute_energy_per_mi");
 
         NodeList spaces = settingsDoc.getElementsByTagName("simulation_space");
         if (spaces.getLength() > 0) {
@@ -415,6 +419,14 @@ public class SimSettings {
      */
     public double getUAVHoverPower() {
         return Double.parseDouble(configFile.getProperty("uav_hover_power", "30"));
+    }
+
+    public double getUAVComputeEnergyPerMi() {
+        return Double.parseDouble(configFile.getProperty("uav_compute_energy_per_mi", "0.001"));
+    }
+
+    public long getSimulationSeed() {
+        return Long.parseLong(configFile.getProperty("simulation_seed", "42"));
     }
     
     /**

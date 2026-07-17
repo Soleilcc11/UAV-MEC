@@ -12,6 +12,7 @@ import org.cloudbus.cloudsim.core.CloudSim;
 import org.junit.jupiter.api.Test;
 
 import edu.boun.edgecloudsim.uav.UAVMECScenarioFactory;
+import edu.boun.edgecloudsim.uav.UAVMECNetworkModel;
 import edu.boun.edgecloudsim.uav.TaskOffloadingOrchestrator;
 import edu.boun.edgecloudsim.edge_client.Task;
 import edu.boun.edgecloudsim.edge_orchestrator.EdgeOrchestrator;
@@ -79,5 +80,11 @@ class EdgeCloudSimIntegrationTest {
         assertTrue(completedOnEdge, "The Edge VM path must complete");
         assertTrue(completedOnUav, "The UAV resource path must complete");
         assertEquals(0, manager.getUAVManager().getActiveEdgeTaskCount());
+        UAVMECNetworkModel networkModel = (UAVMECNetworkModel) manager.getNetworkModel();
+        assertEquals(1, networkModel.getCompletedUavUploadCount());
+        assertEquals(1, networkModel.getCompletedUavDownloadCount());
+        assertEquals(0, networkModel.getActiveUavTransferCount());
+        assertTrue(manager.getUAVManager().getUAVs().stream()
+                .allMatch(uav -> uav.getTotalEnergyConsumed() > 0.0));
     }
 }

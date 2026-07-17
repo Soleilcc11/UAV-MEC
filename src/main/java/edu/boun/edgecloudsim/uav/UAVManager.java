@@ -50,6 +50,7 @@ public class UAVManager {
             return;
         }
         SimSettings simSettings = simManager.getSimulationSettings();
+        random.setSeed(simSettings.getSimulationSeed());
         int numUavs = simSettings.getNumOfUAVs();
         
         SimLogger.printLine("初始化 " + numUavs + " 个UAV...");
@@ -64,6 +65,10 @@ public class UAVManager {
             double processingCapacity = 1500 + random.nextDouble() * 1000; // 提高至1500-2500 MIPS
 
             UAV uav = new UAV(i, position, initialEnergy, processingCapacity);
+            uav.configureEnergyModel(
+                    simSettings.getUAVFlightPower(),
+                    simSettings.getUAVHoverPower(),
+                    simSettings.getUAVComputeEnergyPerMi());
             uavList.add(uav);
             
             SimLogger.printLine("UAV " + i + " 创建在位置 (" + 
@@ -211,10 +216,10 @@ public class UAVManager {
         double[] position = new double[3];
         
         // X坐标
-        position[0] = simSettings.getRandomPositionX();
+        position[0] = random.nextDouble() * simSettings.getSimulationSpace()[0];
         
         // Y坐标
-        position[1] = simSettings.getRandomPositionY();
+        position[1] = random.nextDouble() * simSettings.getSimulationSpace()[1];
         
         // Z坐标（高度）
         position[2] = simSettings.getUAVInitialHeight();

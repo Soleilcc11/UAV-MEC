@@ -23,9 +23,13 @@ public class UAV {
     private Queue<Task> taskQueue;
     private double speed;
     private UAVState state;
-    
-    // 添加处理任务的能量消耗常量
-    private static final double PROCESSING_ENERGY_PER_MI = 0.001; // 每MI消耗的能量
+    private double flightPowerPerSecond = 0.1;
+    private double hoverPowerPerSecond = 0.05;
+    private double processingEnergyPerMi = 0.001;
+    private double flightEnergyConsumed;
+    private double hoverEnergyConsumed;
+    private double processingEnergyConsumed;
+    private int maxObservedQueueLength;
     
     /**
      * UAV状态枚举
@@ -52,6 +56,16 @@ public class UAV {
         this.taskQueue = new LinkedList<>();
         this.speed = 5.0; // 默认速度 m/s
         this.state = UAVState.IDLE;
+    }
+
+    public void configureEnergyModel(double flightPower, double hoverPower,
+            double computeEnergyPerMi) {
+        if (flightPower < 0 || hoverPower < 0 || computeEnergyPerMi < 0) {
+            throw new IllegalArgumentException("Energy coefficients must be non-negative");
+        }
+        this.flightPowerPerSecond = flightPower;
+        this.hoverPowerPerSecond = hoverPower;
+        this.processingEnergyPerMi = computeEnergyPerMi;
     }
     
     /**
@@ -95,8 +109,11 @@ public class UAV {
             state = UAVState.HOVERING;
         }
         
-        // 消耗能量
-        consumeEnergy(distance);
+        if (distance > 0) {
+            consumeFlightEnergy(flightPowerPerSecond);
+        } else {
+            consumeHoverEnergy(hoverPowerPerSecond);
+        }
         
         return position;
     }
@@ -105,14 +122,22 @@ public class UAV {
      * 消耗能量
      * @param distance 移动距离
      */
-    private void consumeEnergy(double distance) {
-        // 简单能量消耗模型
-        double movementEnergy = distance * 0.1; // 每米消耗0.1单位能量
-        double processingEnergy = (state == UAVState.PROCESSING) ? 0.2 : 0; // 处理任务额外消耗
-        double hoveringEnergy = (state == UAVState.HOVERING) ? 0.05 : 0; // 悬停消耗
-        
-        double totalConsumption = movementEnergy + processingEnergy + hoveringEnergy;
-        energy = Math.max(0, energy - totalConsumption);
+    private double consume(double requested) {
+        double consumed = Math.min(energy, Math.max(0.0, requested));
+        energy -= consumed;
+        return consumed;
+    }
+
+    private void consumeFlightEnergy(double requested) {
+        flightEnergyConsumed += consume(requested);
+    }
+
+    private void consumeHoverEnergy(double requested) {
+        hoverEnergyConsumed += consume(requested);
+    }
+
+    private void consumeProcessingEnergy(double requested) {
+        processingEnergyConsumed += consume(requested);
     }
     
     /**
@@ -124,7 +149,11 @@ public class UAV {
         if (taskQueue.size() >= 50) { // 假设最大队列长度为50
             return false;
         }
-        return taskQueue.offer(task);
+        boolean accepted = taskQueue.offer(task);
+        if (accepted) {
+            maxObservedQueueLength = Math.max(maxObservedQueueLength, taskQueue.size());
+        }
+        return accepted;
     }
     
     /**
@@ -147,6 +176,14 @@ public class UAV {
         }
         
         if (taskQueue.isEmpty()) {
+            state = UAVState.HOVERING;
+            consumeHoverEnergy(hoverPowerPerSecond * time);
+            return completedTasks;
+        }
+
+        state = UAVState.PROCESSING;
+        consumeHoverEnergy(hoverPowerPerSecond * time);
+        if (energy <= 0) {
             return completedTasks;
         }
         
@@ -157,6 +194,9 @@ public class UAV {
         
         double usedMIPS = 0;
         double availableMIPS = processingCapacity * time;
+        if (processingEnergyPerMi > 0) {
+            availableMIPS = Math.min(availableMIPS, energy / processingEnergyPerMi);
+        }
         double processingEnergyConsumption = 0;
         
         // 处理队列中的任务
@@ -170,6 +210,7 @@ public class UAV {
             }
             
             double remainingMI = currentTask.getRemainingMI();
+            currentTask.markStarted((long) (CloudSim.clock() * 1000));
             SimLogger.printLine("UAV " + id + " 正在处理任务 #" + currentTask.getId() + 
                             ", 剩余MI: " + remainingMI + 
                             ", 可用MIPS: " + (availableMIPS - usedMIPS));
@@ -180,7 +221,7 @@ public class UAV {
                 usedMIPS += remainingMI;
                 
                 // 计算能量消耗
-                double taskEnergyConsumption = remainingMI * PROCESSING_ENERGY_PER_MI;
+                double taskEnergyConsumption = remainingMI * processingEnergyPerMi;
                 processingEnergyConsumption += taskEnergyConsumption;
                 
                 // 从队列中移除任务
@@ -205,7 +246,7 @@ public class UAV {
                 double newRemainingMI = remainingMI - processedMI;
                 
                 // 计算能量消耗
-                double taskEnergyConsumption = processedMI * PROCESSING_ENERGY_PER_MI;
+                double taskEnergyConsumption = processedMI * processingEnergyPerMi;
                 processingEnergyConsumption += taskEnergyConsumption;
                 
                 // 更新剩余MI
@@ -220,8 +261,8 @@ public class UAV {
         }
         
         // 更新能量消耗
-        energy -= processingEnergyConsumption;
-        if (energy < 0) energy = 0;
+        consumeProcessingEnergy(processingEnergyConsumption);
+        state = taskQueue.isEmpty() ? UAVState.HOVERING : UAVState.PROCESSING;
         
         // 记录处理后状态
         SimLogger.printLine("UAV " + id + " 处理后状态: 能量=" + energy + 
@@ -300,6 +341,26 @@ public class UAV {
     public int getTaskQueueLength() {
         return taskQueue.size();
     }
+
+    public int getMaxObservedQueueLength() {
+        return maxObservedQueueLength;
+    }
+
+    public double getFlightEnergyConsumed() {
+        return flightEnergyConsumed;
+    }
+
+    public double getHoverEnergyConsumed() {
+        return hoverEnergyConsumed;
+    }
+
+    public double getProcessingEnergyConsumed() {
+        return processingEnergyConsumed;
+    }
+
+    public double getTotalEnergyConsumed() {
+        return flightEnergyConsumed + hoverEnergyConsumed + processingEnergyConsumed;
+    }
     
     /**
      * 获取当前状态
@@ -333,6 +394,7 @@ public class UAV {
         private double remainingMI;
         private long arrivalTime;
         private long completionTime;
+        private long startTime;
         private int status;
         
         // 任务状态常量
@@ -351,6 +413,7 @@ public class UAV {
             this.remainingMI = totalMI;
             this.arrivalTime = arrivalTime;
             this.completionTime = -1;
+            this.startTime = -1;
             this.status = CREATED_STATUS;
         }
         
@@ -389,6 +452,20 @@ public class UAV {
          */
         public long getCompletionTime() {
             return completionTime;
+        }
+
+        void markStarted(long currentTime) {
+            if (startTime < 0) {
+                startTime = currentTime;
+            }
+        }
+
+        public long getStartTime() {
+            return startTime;
+        }
+
+        public long getQueueWaitTime() {
+            return startTime < 0 ? -1 : Math.max(0, startTime - arrivalTime);
         }
         
         /**

@@ -16,6 +16,12 @@ strict Gymnasium training boundary.
 The contract and reward are documented in
 [`docs/adr/0001-gymnasium-contract.md`](docs/adr/0001-gymnasium-contract.md).
 
+GymBridge protocol 1.1 binds each run to the listening Java service. `hello`
+exposes the actual XML hashes, loaded class-artifact hash, Java source-tree hash,
+Git HEAD, and a stale-class check. The experiment CLI rejects a server whose
+configuration, commit, or source tree differs from the client checkout and
+records the verified service provenance in its JSON output.
+
 ## Setup and regression tests
 
 Python 3.11+ and Maven are required.
@@ -88,7 +94,9 @@ Normal movement head. PPO ratios use the actual executed joint action log-prob;
 `terminated` never bootstraps, while truncated bootstrapping is explicit in the
 saved configuration.
 
-Use a fixed environment interaction budget, not an episode count:
+Use a fixed environment interaction budget, not an episode count. The budget
+is a **cumulative target**: on a fresh agent `--interaction-budget 64` performs
+64 interactions and leaves `training_steps == 64`.
 
 ```bash
 .venv/bin/python -m uav_mec_gym.experiment train-ppo \
@@ -107,10 +115,38 @@ Use a fixed environment interaction budget, not an episode count:
 ```
 
 The checkpoint includes actor, critic, optimizer, pending rollout, step/update
-counters, configuration, observation-normalization statistics, and Python,
-NumPy, and PyTorch RNG states. The training JSON keeps raw per-transition and
-per-episode evidence, the exact interaction budget, config hashes, seed
-partitions, checkpoint hash, and Git commit SHA.
+counters, configuration, observation-normalization statistics, Python, NumPy,
+and PyTorch RNG states, and the next environment-training-seed cursor. The
+training JSON keeps raw per-transition and per-episode evidence, the cumulative
+interaction target, the interactions performed by this invocation, config
+hashes, seed partitions, checkpoint hash, and Git commit SHA.
+
+To continue training, load the prior checkpoint and set a larger cumulative
+target. Keep `--training-seed-start` equal to the original run; the command
+rejects a different value instead of reusing training seeds. The checkpoint's
+PPO configuration is authoritative on resume, and its action-sampling RNG is
+continued without reseeding:
+
+```bash
+.venv/bin/python -m uav_mec_gym.experiment train-ppo \
+  --port 12347 --uavs 2 \
+  --environment-config \
+    src/test/resources/config/simulation_settings.xml \
+    src/test/resources/config/edge_devices.xml \
+    src/test/resources/config/applications.xml \
+  --resume-from results/phase4/checkpoints/ppo_smoke.pt \
+  --interaction-budget 128 \
+  --training-seed-start 101 \
+  --validation-seeds 201 202 203 204 205 \
+  --heldout-seeds 301 302 303 304 305 \
+  --checkpoint results/phase4/checkpoints/ppo_smoke_128.pt \
+  --output results/phase4/ppo_training_resume_128.json
+```
+
+For an exact interrupted-versus-uninterrupted replay, checkpoint at a completed
+episode and rollout-update boundary. A forced budget cutoff is recorded as a
+truncation and the short rollout is flushed, so choosing a cutoff inside either
+boundary intentionally defines a different (but fully recorded) training run.
 
 ## Paired validation and held-out evaluation
 

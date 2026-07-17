@@ -241,7 +241,10 @@ def evaluate_policy(env: gym.Env, policy: Policy, seeds: list[int]) -> list[Epis
                 if not np.isfinite(value) or value < 0.0:
                     raise ValueError(f"Invalid physical step metric {key}: {value}")
                 physical_metric_sums[key] += value
-            successful_tasks += int(info["reward_components"]["success"] > 0.5)
+            success_delta = float(info["reward_components"]["success"])
+            if success_delta < 0.0 or not np.isclose(success_delta, round(success_delta)):
+                raise ValueError("GymBridge success component must be a task count")
+            successful_tasks += int(round(success_delta))
         physical_metric_means = {
             key: value / steps if steps else 0.0
             for key, value in physical_metric_sums.items()

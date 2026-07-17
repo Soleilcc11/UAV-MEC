@@ -30,8 +30,19 @@ class _Handler(socketserver.StreamRequestHandler):
             }
             if request["type"] == "hello":
                 response["spec"] = {
-                    "protocol_version": "1.0",
+                    "protocol_version": "1.1",
                     "number_of_uavs": 2,
+                    "provenance": {
+                        "environment": {
+                            "files": [{"name": "config.xml", "sha256": "c" * 64}]
+                        },
+                        "runtime": {
+                            "artifact_sha256": "a" * 64,
+                            "classes_current": True,
+                            "git_commit_sha": "abc123",
+                            "source_tree_sha256": "s" * 64,
+                        },
+                    },
                 }
             elif request["type"] == "reset":
                 response.update(observation=_observation(), info={"seed": request["seed"]})
@@ -45,6 +56,7 @@ class _Handler(socketserver.StreamRequestHandler):
                         "uav_energy_ratio": 0.05,
                         "constraint_violations": 0.0,
                     },
+                    reward=0.9,
                     terminated=True,
                     truncated=False,
                     metrics={"settled_tasks": 1},
@@ -57,7 +69,13 @@ def test_java_backend_performs_versioned_round_trip():
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     backend = JavaGymBridgeBackend(
-        port=server.server_address[1], expected_number_of_uavs=2
+        port=server.server_address[1],
+        expected_number_of_uavs=2,
+        expected_environment_manifest={
+            "files": [{"name": "config.xml", "sha256": "c" * 64}]
+        },
+        expected_git_commit_sha="abc123",
+        expected_source_tree_sha256="s" * 64,
     )
     try:
         observation, info = backend.reset(42)
@@ -65,6 +83,8 @@ def test_java_backend_performs_versioned_round_trip():
         assert info == {"seed": 42}
         assert observation["action_mask"] == [0, 1, 1, 1, 1]
         assert result.reward_components.success == 1.0
+        assert result.reward == 0.9
+        assert backend.provenance["runtime"]["artifact_sha256"] == "a" * 64
         assert result.terminated is True
     finally:
         backend.close()

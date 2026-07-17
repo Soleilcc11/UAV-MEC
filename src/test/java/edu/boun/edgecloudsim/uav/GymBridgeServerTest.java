@@ -56,4 +56,23 @@ class GymBridgeServerTest {
         assertFalse(response.getBoolean("ok"));
         assertTrue(response.getString("error").contains("Protocol version mismatch"));
     }
+
+    @Test
+    void helloSpecificationBindsRuntimeAndEnvironmentContent() {
+        GymBridgeSession session = new GymBridgeSession(
+                "src/test/resources/config/simulation_settings.xml",
+                "src/test/resources/config/edge_devices.xml",
+                "src/test/resources/config/applications.xml",
+                1);
+
+        JSONObject provenance = session.specification().getJSONObject("provenance");
+        JSONObject runtime = provenance.getJSONObject("runtime");
+
+        assertEquals(3, provenance.getJSONObject("environment")
+                .getJSONArray("files").length());
+        assertEquals(64, runtime.getString("artifact_sha256").length());
+        assertEquals(64, runtime.getString("source_tree_sha256").length());
+        assertEquals(40, runtime.getString("git_commit_sha").length());
+        assertTrue(runtime.getBoolean("classes_current"));
+    }
 }

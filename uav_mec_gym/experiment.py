@@ -34,7 +34,7 @@ from .evaluation import (
 from .ppo import MixedActionPPO, PPOConfig
 
 
-RESULT_FORMAT_VERSION = 1
+RESULT_FORMAT_VERSION = 2
 MIN_PAIRED_SEEDS = 5
 SUMMARY_METRICS = (
     "total_reward",
@@ -92,6 +92,28 @@ def current_commit_sha(repository: str | Path = ".") -> str:
     return result.stdout.strip()
 
 
+def repository_source_sha256(repository: str | Path = ".") -> str:
+    """Hash the Java build inputs using the same path+NUL+content scheme as Java."""
+
+    root = Path(repository).resolve()
+    files: list[Path] = []
+    pom = root / "pom.xml"
+    if pom.is_file():
+        files.append(pom)
+    for relative_root in (Path("src/main/java"), Path("src/main/resources")):
+        directory = root / relative_root
+        if directory.is_dir():
+            files.extend(path for path in directory.rglob("*") if path.is_file())
+    digest = hashlib.sha256()
+    for path in sorted(files, key=lambda item: item.relative_to(root).as_posix()):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _physical_step_metrics(info: Mapping[str, Any]) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for key in PHYSICAL_STEP_METRICS:
@@ -132,7 +154,12 @@ def _finalize_training_episode(
         for key, value in row["physical_metrics"].items():
             physical_sums[key] += float(value)
     settled = int(last["settled_tasks"])
-    successful = int(sum(row["reward_components"]["success"] > 0.5 for row in step_rows))
+    successful_value = float(component_sums.get("success", 0.0))
+    if successful_value < 0.0 or not np.isclose(
+        successful_value, round(successful_value)
+    ):
+        raise ValueError("Training success component must be a task count")
+    successful = int(round(successful_value))
     if successful > settled or settled > int(last["total_tasks"]):
         raise ValueError("Training episode task counts are inconsistent")
     simulation_time = float(last["simulation_time"])
@@ -164,18 +191,30 @@ def train_ppo(
     interaction_budget: int,
     training_seed_start: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, float]]]:
-    """Train for exactly ``interaction_budget`` real environment steps."""
+    """Train to a cumulative real-environment interaction target.
+
+    ``interaction_budget`` is the desired final value of
+    ``agent.training_steps``, not an additional per-invocation allowance.  A
+    fresh agent therefore retains the original behaviour, while a restored
+    agent performs exactly ``interaction_budget - agent.training_steps`` new
+    interactions.  The policy RNG is deliberately not reset at episode
+    boundaries; its checkpointed stream continues independently from the
+    persisted environment-seed cursor.
+    """
 
     if interaction_budget <= 0:
         raise ValueError("interaction_budget must be positive")
+    starting_training_steps = int(agent.training_steps)
+    if interaction_budget <= starting_training_steps:
+        raise ValueError(
+            "interaction_budget is a cumulative target and must exceed the "
+            f"checkpoint's {starting_training_steps} training steps"
+        )
     episodes: list[dict[str, Any]] = []
     updates: list[dict[str, float]] = []
-    global_step = 0
-    episode_index = 0
 
-    while global_step < interaction_budget:
-        seed = int(training_seed_start + episode_index)
-        agent.reset(seed)
+    while agent.training_steps < interaction_budget:
+        seed = agent.reserve_training_episode_seed(training_seed_start)
         observation, reset_info = env.reset(seed=seed)
         if int(reset_info.get("seed", seed)) != seed:
             raise ValueError("GymBridge reset did not echo the requested seed")
@@ -190,9 +229,14 @@ def train_ppo(
             next_observation, reward, terminated, truncated, info = env.step(
                 sample.action
             )
-            global_step += 1
+            global_step = int(agent.training_steps)
+            # store_transition advances the authoritative cumulative counter.
+            # Compute the row index and budget boundary from that post-store
+            # value below.
+            expected_global_step = global_step + 1
             budget_truncated = (
-                global_step >= interaction_budget and not (terminated or truncated)
+                expected_global_step >= interaction_budget
+                and not (terminated or truncated)
             )
             learning_truncated = bool(truncated or budget_truncated)
             agent.store_transition(
@@ -202,6 +246,9 @@ def train_ppo(
                 bool(terminated),
                 learning_truncated,
             )
+            global_step = int(agent.training_steps)
+            if global_step != expected_global_step:
+                raise AssertionError("PPO training step counter did not advance once")
 
             physical = _physical_step_metrics(info)
             components = _reward_components(info)
@@ -241,13 +288,14 @@ def train_ppo(
                 truncated=episode_truncated,
             )
         )
-        episode_index += 1
 
     tail_update = agent.update()
     if tail_update is not None:
         updates.append(tail_update)
     if agent.training_steps != interaction_budget:
-        raise AssertionError("PPO training step counter diverged from interaction budget")
+        raise AssertionError(
+            "PPO training step counter diverged from cumulative interaction target"
+        )
     return episodes, updates
 
 
@@ -264,8 +312,10 @@ def audit_episode_results(results: Iterable[EpisodeResult]) -> None:
             raise ValueError("Evaluation task counts are inconsistent")
         if result.simulation_time <= 0.0:
             raise ValueError("Evaluation lost the terminal simulation clock")
-        if result.steps != result.settled_tasks:
-            raise ValueError("One-step-per-current-task contract was violated")
+        if not result.settled_tasks <= result.steps <= result.total_tasks:
+            raise ValueError("Arrival decisions and settled task counts are inconsistent")
+        if result.terminated and result.steps != result.total_tasks:
+            raise ValueError("Natural termination must decide every configured task")
         success_sum = float(result.reward_component_sums.get("success", np.nan))
         if not np.isfinite(success_sum) or not np.isclose(
             success_sum, result.successful_tasks
@@ -296,6 +346,7 @@ def build_fair_evaluation_report(
     environment: Mapping[str, Any],
     commit_sha: str,
     checkpoint_path: str | Path,
+    service_provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     unique_seeds = [int(seed) for seed in seeds]
     if len(unique_seeds) < MIN_PAIRED_SEEDS or len(set(unique_seeds)) != len(unique_seeds):
@@ -377,6 +428,9 @@ def build_fair_evaluation_report(
         "paired_seeds": unique_seeds,
         "git_commit_sha": commit_sha,
         "environment": dict(environment),
+        "service_provenance": None
+        if service_provenance is None
+        else dict(service_provenance),
         "checkpoint": {
             "path": str(checkpoint),
             "sha256": checkpoint_hash,
@@ -395,7 +449,8 @@ def build_fair_evaluation_report(
             "status": "passed",
             "checks": [
                 "paired seed sets are identical",
-                "one transition settles one current task",
+                "one action is recorded for each arrived task",
+                "concurrent task settlements may aggregate between decision epochs",
                 "success <= settled <= total",
                 "terminal simulation time is positive",
                 "raw physical metrics are finite and non-negative",
@@ -436,7 +491,20 @@ def _build_parser() -> argparse.ArgumentParser:
     train_parser = subparsers.add_parser("train-ppo")
     _add_shared_bridge_arguments(train_parser)
     train_parser.add_argument("--checkpoint", type=Path, required=True)
-    train_parser.add_argument("--interaction-budget", type=int, required=True)
+    train_parser.add_argument(
+        "--resume-from",
+        type=Path,
+        help=(
+            "PPO checkpoint to continue; its algorithm config and RNG state are "
+            "authoritative"
+        ),
+    )
+    train_parser.add_argument(
+        "--interaction-budget",
+        type=int,
+        required=True,
+        help="Cumulative target for agent.training_steps",
+    )
     train_parser.add_argument("--training-seed-start", type=int, required=True)
     train_parser.add_argument(
         "--validation-seeds", type=int, nargs="+", default=[201, 202, 203, 204, 205]
@@ -466,33 +534,55 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
     environment = environment_manifest(args.environment_config)
-    commit_sha = current_commit_sha(Path(__file__).resolve().parents[1])
+    repository = Path(__file__).resolve().parents[1]
+    commit_sha = current_commit_sha(repository)
+    source_tree_sha256 = repository_source_sha256(repository)
     backend = JavaGymBridgeBackend(
         host=args.host,
         port=args.port,
         expected_number_of_uavs=args.uavs,
+        expected_environment_manifest=environment,
+        expected_git_commit_sha=commit_sha,
+        expected_source_tree_sha256=source_tree_sha256,
     )
     env = UAVMECGymEnv(args.uavs, backend)
     try:
         if args.command == "train-ppo":
-            config = PPOConfig(
-                rollout_steps=args.rollout_steps,
-                minibatch_size=args.minibatch_size,
-                update_epochs=args.update_epochs,
-                hidden_sizes=tuple(args.hidden_sizes),
-                learning_rate=args.learning_rate,
-                bootstrap_truncated=not args.no_bootstrap_truncated,
-            )
-            agent = MixedActionPPO(
-                args.uavs, config=config, seed=args.training_seed_start
-            )
+            resume_source: dict[str, str] | None = None
+            if args.resume_from is not None:
+                resume_source = {
+                    "path": str(args.resume_from),
+                    "sha256": file_sha256(args.resume_from),
+                }
+                agent = MixedActionPPO.load_checkpoint(args.resume_from)
+                if agent.number_of_uavs != args.uavs:
+                    raise ValueError("Checkpoint UAV count does not match GymBridge")
+                config = agent.config
+            else:
+                config = PPOConfig(
+                    rollout_steps=args.rollout_steps,
+                    minibatch_size=args.minibatch_size,
+                    update_epochs=args.update_epochs,
+                    hidden_sizes=tuple(args.hidden_sizes),
+                    learning_rate=args.learning_rate,
+                    bootstrap_truncated=not args.no_bootstrap_truncated,
+                )
+                agent = MixedActionPPO(
+                    args.uavs, config=config, seed=args.training_seed_start
+                )
+            starting_training_interactions = int(agent.training_steps)
             episodes, updates = train_ppo(
                 env,
                 agent,
                 interaction_budget=args.interaction_budget,
                 training_seed_start=args.training_seed_start,
             )
-            used_training_seeds = [episode["seed"] for episode in episodes]
+            used_training_seeds_this_run = [episode["seed"] for episode in episodes]
+            if agent.training_seed_start is None or agent.next_training_seed is None:
+                raise AssertionError("PPO training seed cursor was not recorded")
+            used_training_seeds = list(
+                range(agent.training_seed_start, agent.next_training_seed)
+            )
             seed_partitions = {
                 "training": set(used_training_seeds),
                 "validation": set(args.validation_seeds),
@@ -517,17 +607,26 @@ def main() -> None:
                 "algorithm_config": config_dict,
                 "algorithm_config_hash": canonical_hash(config_dict),
                 "environment": environment,
+                "service_provenance": backend.provenance,
                 "git_commit_sha": commit_sha,
                 "interaction_budget": args.interaction_budget,
+                "interaction_budget_semantics": "cumulative_training_steps_target",
+                "starting_training_interactions": starting_training_interactions,
+                "interactions_this_run": (
+                    args.interaction_budget - starting_training_interactions
+                ),
+                "resume_source": resume_source,
                 "seed_partitions": {
                     "training_seeds_used": used_training_seeds,
+                    "training_seeds_used_this_run": used_training_seeds_this_run,
+                    "next_training_seed": agent.next_training_seed,
                     "validation_seeds_reserved": list(args.validation_seeds),
                     "heldout_seeds_reserved": list(args.heldout_seeds),
                 },
                 "checkpoint": {
                     "path": str(args.checkpoint),
                     "sha256": checkpoint_hash,
-                    "selection": "final fixed-interaction-budget checkpoint",
+                    "selection": "final cumulative-interaction-target checkpoint",
                 },
                 "episodes": episodes,
                 "updates": updates,
@@ -550,6 +649,7 @@ def main() -> None:
                 environment=environment,
                 commit_sha=commit_sha,
                 checkpoint_path=args.checkpoint,
+                service_provenance=backend.provenance,
             )
             _write_json(args.output, report)
     finally:

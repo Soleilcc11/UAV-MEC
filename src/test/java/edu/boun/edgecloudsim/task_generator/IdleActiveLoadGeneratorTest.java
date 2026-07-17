@@ -1,6 +1,7 @@
 package edu.boun.edgecloudsim.task_generator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
@@ -28,6 +29,7 @@ class IdleActiveLoadGeneratorTest {
         second.initializeModel();
 
         assertTaskListsEqual(first.getTaskList(), second.getTaskList());
+        assertChronological(first.getTaskList());
     }
 
     private void assertTaskListsEqual(List<TaskProperty> first, List<TaskProperty> second) {
@@ -41,6 +43,13 @@ class IdleActiveLoadGeneratorTest {
             assertEquals(left.getLength(), right.getLength());
             assertEquals(left.getInputFileSize(), right.getInputFileSize());
             assertEquals(left.getOutputFileSize(), right.getOutputFileSize());
+        }
+    }
+
+    private void assertChronological(List<TaskProperty> tasks) {
+        for (int i = 1; i < tasks.size(); i++) {
+            assertTrue(tasks.get(i - 1).getStartTime() <= tasks.get(i).getStartTime(),
+                    "The global workload must be ordered by task arrival time");
         }
     }
 }

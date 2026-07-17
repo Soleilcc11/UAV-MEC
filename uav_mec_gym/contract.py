@@ -24,6 +24,7 @@ class RewardComponents:
 class BackendStep:
     observation: Observation
     reward_components: RewardComponents
+    reward: float
     terminated: bool
     truncated: bool
     metrics: Mapping[str, Any]
@@ -94,7 +95,9 @@ class UAVMECGymEnv(gym.Env[dict[str, np.ndarray], dict[str, Any]]):
         movement = np.asarray(action["movement"], dtype=np.float32)
         result = self.backend.step(target, movement)
         observation = self._validate_observation(result.observation)
-        reward = self.calculate_reward(result.reward_components)
+        reward = float(result.reward)
+        if not np.isfinite(reward):
+            raise ValueError("Backend returned a non-finite reward")
         info = dict(result.metrics)
         info["reward_components"] = {
             "success": result.reward_components.success,
@@ -103,10 +106,18 @@ class UAVMECGymEnv(gym.Env[dict[str, np.ndarray], dict[str, Any]]):
             "uav_energy_ratio": result.reward_components.uav_energy_ratio,
             "constraint_violations": result.reward_components.constraint_violations,
         }
+        info["settled_in_transition"] = int(
+            result.metrics.get("settled_in_transition", 0)
+        )
         return observation, reward, result.terminated, result.truncated, info
 
     @staticmethod
     def calculate_reward(components: RewardComponents) -> float:
+        """Reference calculation for a single settled task.
+
+        Production GymBridge 1.1 supplies the authoritative interval reward,
+        which can aggregate several concurrent task settlements.
+        """
         reward = (
             float(np.clip(components.success, 0.0, 1.0))
             - 0.35 * min(max(components.latency_ratio, 0.0), 2.0)

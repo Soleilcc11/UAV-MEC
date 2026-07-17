@@ -1,6 +1,7 @@
 package edu.boun.edgecloudsim.task_generator;
 import edu.boun.edgecloudsim.utils.ArrayUtils;
 import java.util.ArrayList;
+import java.util.Comparator;
 
 import org.apache.commons.math3.distribution.ExponentialDistribution;
 import org.apache.commons.math3.random.RandomGenerator;
@@ -107,7 +108,13 @@ public class IdleActiveLoadGenerator extends LoadGeneratorModel {
             // 为调试添加日志
             System.out.println("为设备" + i + "生成了" + deviceTasks + "个任务");
         }
-        
+
+        // Tasks are generated one device at a time above. EdgeCloudSim consumes
+        // this list as one global workload, so expose it in simulation-time order
+        // rather than in device order. ArrayList.sort is stable, which also keeps
+        // deterministic generation order for equal-time arrivals.
+        taskList.sort(Comparator.comparingDouble(TaskProperty::getStartTime));
+
         // 确认任务数量
         System.out.println("总共生成了" + taskList.size() + "个任务");
         

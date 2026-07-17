@@ -604,6 +604,54 @@ class MixedActionPPO:
         self.buffer = RolloutBuffer()
         self.training_steps = 0
         self.update_count = 0
+        # Environment episode seeds are a separate stream from policy-action
+        # sampling.  Training must never call ``reset`` on a restored agent,
+        # because doing so would discard the checkpointed action RNG state.
+        self.training_seed_start: int | None = None
+        self.training_episode_count = 0
+        self._legacy_next_training_seed: int | None = None
+
+    @property
+    def next_training_seed(self) -> int | None:
+        """Next environment seed in the persisted training seed schedule."""
+
+        if self.training_seed_start is None:
+            return None
+        return self.training_seed_start + self.training_episode_count
+
+    def reserve_training_episode_seed(self, training_seed_start: int) -> int:
+        """Reserve the next non-repeating environment seed for training.
+
+        The schedule is initialized on the first call and then persisted in
+        checkpoints.  A resume command must supply the same seed-series start;
+        this catches accidental restarts that would otherwise silently reuse
+        training episodes.  Version-1 checkpoints predate the explicit cursor,
+        so their last policy seed is conservatively treated as already used.
+        """
+
+        requested_start = int(training_seed_start)
+        if self.training_seed_start is None:
+            self.training_seed_start = requested_start
+            if self._legacy_next_training_seed is not None:
+                inferred_count = self._legacy_next_training_seed - requested_start
+                if inferred_count < 0:
+                    raise ValueError(
+                        "training_seed_start is later than the next seed inferred "
+                        "from this legacy checkpoint"
+                    )
+                self.training_episode_count = inferred_count
+                self._legacy_next_training_seed = None
+        elif requested_start != self.training_seed_start:
+            raise ValueError(
+                "training_seed_start does not match the checkpointed training "
+                f"schedule ({requested_start} != {self.training_seed_start})"
+            )
+
+        seed = self.next_training_seed
+        if seed is None:  # pragma: no cover - guarded by initialization above.
+            raise AssertionError("training seed schedule was not initialized")
+        self.training_episode_count += 1
+        return seed
 
     @staticmethod
     def masked_logits(
@@ -817,7 +865,12 @@ class MixedActionPPO:
         ).action
 
     def reset(self, seed: int) -> None:
-        """Reset agent-local action-sampling streams for evaluation."""
+        """Reset agent-local action-sampling streams for evaluation only.
+
+        Training intentionally keeps a continuous RNG stream across environment
+        episodes and checkpoint reloads; ``train_ppo`` therefore never calls
+        this method.
+        """
 
         self.seed = int(seed)
         self._seed_global_rngs(self.seed)
@@ -1011,7 +1064,7 @@ class MixedActionPPO:
         optimizer_state = self.optimizer.state_dict()
         rng_state = self._rng_state()
         checkpoint = {
-            "format_version": 1,
+            "format_version": 2,
             "number_of_uavs": self.number_of_uavs,
             "config": asdict(self.config),
             "actor_state_dict": actor_state,
@@ -1025,6 +1078,8 @@ class MixedActionPPO:
             "training_steps": self.training_steps,
             "update_count": self.update_count,
             "seed": self.seed,
+            "training_seed_start": self.training_seed_start,
+            "training_episode_count": self.training_episode_count,
             "observation_normalizer": self.observation_normalizer.state_dict(),
             "rollout_buffer": self.buffer.state_dict(),
             "rng_state": rng_state,
@@ -1052,7 +1107,8 @@ class MixedActionPPO:
             checkpoint = torch.load(checkpoint_path, map_location="cpu")
         if not isinstance(checkpoint, Mapping):
             raise ValueError("invalid PPO checkpoint")
-        if int(checkpoint.get("format_version", 1)) != 1:
+        format_version = int(checkpoint.get("format_version", 1))
+        if format_version not in {1, 2}:
             raise ValueError("unsupported PPO checkpoint format")
 
         config = PPOConfig(**dict(checkpoint["config"]))
@@ -1081,6 +1137,28 @@ class MixedActionPPO:
         agent.optimizer.load_state_dict(optimizer_state)
         agent.training_steps = int(checkpoint["training_steps"])
         agent.update_count = int(checkpoint["update_count"])
+        if format_version >= 2:
+            raw_training_seed_start = checkpoint.get("training_seed_start")
+            agent.training_seed_start = (
+                None
+                if raw_training_seed_start is None
+                else int(raw_training_seed_start)
+            )
+            agent.training_episode_count = int(
+                checkpoint.get("training_episode_count", 0)
+            )
+            if agent.training_episode_count < 0:
+                raise ValueError("invalid training episode count in checkpoint")
+            if (
+                agent.training_seed_start is None
+                and agent.training_episode_count != 0
+            ):
+                raise ValueError("checkpoint has a seed cursor without a seed start")
+        elif agent.training_steps > 0:
+            # Old train_ppo reset the policy RNG to each episode seed, leaving
+            # ``seed`` equal to the last used environment seed.  Defer mapping
+            # this cursor to the caller's original seed start until resume.
+            agent._legacy_next_training_seed = int(checkpoint["seed"]) + 1
         agent.observation_normalizer.load_state_dict(
             checkpoint["observation_normalizer"]
         )

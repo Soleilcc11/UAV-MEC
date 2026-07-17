@@ -1,8 +1,7 @@
 package edu.boun.edgecloudsim.core;
 
 import java.util.ArrayList;
-import java.util.ArrayDeque;
-import java.util.Deque;
+import java.util.Comparator;
 import java.util.List;
 
 import org.cloudbus.cloudsim.Vm;
@@ -54,7 +53,6 @@ public class SimManager extends SimEntity {
     private PerformanceMonitor performanceMonitor;
     private final List<TaskProperty> pendingUavTasks = new ArrayList<>();
     private final List<UavMovementCommand> pendingUavMovements = new ArrayList<>();
-    private final Deque<TaskProperty> pendingGymTasks = new ArrayDeque<>();
 
     private int numOfMobileDevice;
     private String simScenario;
@@ -63,7 +61,6 @@ public class SimManager extends SimEntity {
     private int scheduledEdgeTaskCount;
     private int submittedEdgeTaskCount;
     private GymDecisionCoordinator gymCoordinator;
-    private boolean nextGymTaskReady;
 
     private SimManager() {
         super("SimManager");
@@ -180,7 +177,6 @@ public class SimManager extends SimEntity {
                 break;
 
             case PROCESS_UAV_TASKS:
-                processNextGymTaskIfReady();
                 if (uavManager != null) {
                     uavManager.processTasks(1.0);
                     if (performanceMonitor != null) {
@@ -227,12 +223,14 @@ public class SimManager extends SimEntity {
         scheduledEdgeTaskCount = loadGeneratorModel.getTaskList().size();
         if (gymCoordinator != null) {
             gymCoordinator.setTotalTaskCount(scheduledEdgeTaskCount);
-            pendingGymTasks.addAll(loadGeneratorModel.getTaskList());
-            scheduleNextGymTask();
-        } else {
-            for (TaskProperty task : loadGeneratorModel.getTaskList()) {
-                schedule(getId(), Math.max(0.0, task.getStartTime()), SUBMIT_EDGE_TASK, task);
-            }
+        }
+        List<TaskProperty> edgeTasks = new ArrayList<>(loadGeneratorModel.getTaskList());
+        edgeTasks.sort(Comparator.comparingDouble(TaskProperty::getStartTime));
+        for (TaskProperty task : edgeTasks) {
+            // startEntity runs on CloudSim's simulation thread. Scheduling the
+            // complete workload here keeps FutureQueue ownership off the socket
+            // thread and lets independent task executions overlap naturally.
+            schedule(getId(), Math.max(0.0, task.getStartTime()), SUBMIT_EDGE_TASK, task);
         }
         for (TaskProperty task : pendingUavTasks) {
             schedule(getId(), Math.max(0.0, task.getStartTime()), SUBMIT_UAV_TASK, task);
@@ -307,39 +305,25 @@ public class SimManager extends SimEntity {
         }
         double[][] movements = decision.getMovements();
         for (int i = 0; i < movements.length; i++) {
-            uavManager.moveUav(i, movements[i]);
+            uavManager.moveUav(
+                    i, movements[i], decision.getMovementElapsedSeconds());
         }
         if (mobileDeviceManager instanceof edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager) {
             edu.boun.edgecloudsim.edge_client.Task task =
                     ((edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager) mobileDeviceManager)
                             .submitTask(decision.getTask(), decision.getTarget());
             gymCoordinator.onTaskSubmitted(task, decision);
-            if (task == null || task.getCloudletStatus() != org.cloudbus.cloudsim.Cloudlet.CREATED) {
-                scheduleNextGymTask();
-            }
+        } else {
+            // A Gym task must always reach a terminal accounting state even if a
+            // custom scenario supplies a broker that cannot accept forced targets.
+            gymCoordinator.onTaskSubmitted(null, decision);
         }
     }
 
     public void notifyGymTaskSettled(edu.boun.edgecloudsim.edge_client.Task task) {
         if (gymCoordinator != null) {
             gymCoordinator.onTaskSettled(task);
-            scheduleNextGymTask();
         }
-    }
-
-    private void scheduleNextGymTask() {
-        nextGymTaskReady = !pendingGymTasks.isEmpty();
-    }
-
-    private void processNextGymTaskIfReady() {
-        TaskProperty next = pendingGymTasks.peekFirst();
-        if (!nextGymTaskReady || next == null || next.getStartTime() > CloudSim.clock()) {
-            return;
-        }
-        pendingGymTasks.removeFirst();
-        nextGymTaskReady = false;
-        submittedEdgeTaskCount++;
-        applyGymDecision(gymCoordinator.onTaskArrival(next));
     }
 
     private static final class UavMovementCommand {

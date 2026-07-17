@@ -96,13 +96,29 @@ public class UAVManager {
     }
 
     public boolean moveUav(int uavId, double[] displacement) {
+        return moveUav(uavId, displacement, 1.0);
+    }
+
+    public boolean moveUav(int uavId, double[] displacement, double elapsedSeconds) {
         UAV uav = getUAV(uavId);
         if (uav == null || displacement == null || displacement.length != 3) {
             return false;
         }
-        double[] newPosition = uav.updatePosition(displacement.clone());
+        double[] current = uav.getPosition().clone();
+        double[] requestedPosition = new double[] {
+                current[0] + displacement[0],
+                current[1] + displacement[1],
+                current[2] + displacement[2]
+        };
+        boolean constrained = enforceBoundaryConstraints(requestedPosition);
+        double[] actualDisplacement = new double[] {
+                requestedPosition[0] - current[0],
+                requestedPosition[1] - current[1],
+                requestedPosition[2] - current[2]
+        };
+        uav.updatePosition(actualDisplacement, elapsedSeconds);
         movementCommandCount++;
-        if (enforceBoundaryConstraints(uav, newPosition)) {
+        if (constrained) {
             boundaryConstraintCount++;
         }
         return true;
@@ -243,7 +259,7 @@ public class UAVManager {
      * @param uav UAV对象
      * @param position 位置坐标
      */
-    private boolean enforceBoundaryConstraints(UAV uav, double[] position) {
+    private boolean enforceBoundaryConstraints(double[] position) {
         SimSettings simSettings = simManager.getSimulationSettings();
         double[] simSpace = simSettings.getSimulationSpace();
         double minHeight = simSettings.getUAVMinHeight();

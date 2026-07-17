@@ -4,11 +4,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
 from uav_mec_gym.evaluation import MinimumEstimatedDelayPolicy, RandomMaskedPolicy
 from uav_mec_gym.experiment import (
     build_fair_evaluation_report,
     environment_manifest,
+    repository_source_sha256,
     train_ppo,
 )
 from uav_mec_gym.ppo import MixedActionPPO, PPOConfig
@@ -102,6 +104,102 @@ def test_training_uses_exact_interaction_budget_and_flushes_tail():
     assert episodes[1]["transitions"][-1]["interaction_budget_truncated"] is True
     assert len(agent.buffer) == 0
     assert sum(int(update["rollout_steps"]) for update in updates) == 3
+    assert agent.training_seed_start == 101
+    assert agent.training_episode_count == 2
+    assert agent.next_training_seed == 103
+
+
+def test_checkpoint_resume_matches_uninterrupted_training_and_advances_seeds(
+    tmp_path: Path,
+):
+    uninterrupted = _agent(seed=101)
+    uninterrupted_episodes, _ = train_ppo(
+        _ShortEpisodeEnv(),
+        uninterrupted,
+        interaction_budget=4,
+        training_seed_start=101,
+    )
+
+    split = _agent(seed=101)
+    first_episodes, _ = train_ppo(
+        _ShortEpisodeEnv(),
+        split,
+        interaction_budget=2,
+        training_seed_start=101,
+    )
+    checkpoint = tmp_path / "resume.pt"
+    split.save_checkpoint(checkpoint)
+    resumed = MixedActionPPO.load_checkpoint(checkpoint)
+    resumed_episodes, _ = train_ppo(
+        _ShortEpisodeEnv(),
+        resumed,
+        interaction_budget=4,
+        training_seed_start=101,
+    )
+
+    assert [episode["seed"] for episode in uninterrupted_episodes] == [101, 102]
+    assert [episode["seed"] for episode in first_episodes] == [101]
+    assert [episode["seed"] for episode in resumed_episodes] == [102]
+    assert [
+        transition["global_step"]
+        for episode in resumed_episodes
+        for transition in episode["transitions"]
+    ] == [3, 4]
+    assert resumed.training_steps == uninterrupted.training_steps == 4
+    assert resumed.update_count == uninterrupted.update_count == 2
+    assert resumed.training_seed_start == uninterrupted.training_seed_start == 101
+    assert resumed.training_episode_count == uninterrupted.training_episode_count == 2
+    assert resumed.next_training_seed == uninterrupted.next_training_seed == 103
+
+    expected_transitions = [
+        transition
+        for episode in uninterrupted_episodes
+        for transition in episode["transitions"]
+    ]
+    resumed_transitions = [
+        transition
+        for episode in first_episodes + resumed_episodes
+        for transition in episode["transitions"]
+    ]
+    for expected, actual in zip(expected_transitions, resumed_transitions, strict=True):
+        assert actual["target"] == expected["target"]
+        assert actual["old_joint_log_prob"] == expected["old_joint_log_prob"]
+        np.testing.assert_array_equal(actual["movement"], expected["movement"])
+
+    for expected_state, actual_state in (
+        (uninterrupted.actor.state_dict(), resumed.actor.state_dict()),
+        (uninterrupted.critic.state_dict(), resumed.critic.state_dict()),
+    ):
+        assert expected_state.keys() == actual_state.keys()
+        for key in expected_state:
+            torch.testing.assert_close(
+                expected_state[key], actual_state[key], rtol=0, atol=0
+            )
+
+
+def test_resume_requires_a_larger_cumulative_target_and_same_seed_schedule():
+    agent = _agent(seed=101)
+    train_ppo(
+        _ShortEpisodeEnv(),
+        agent,
+        interaction_budget=2,
+        training_seed_start=101,
+    )
+
+    with pytest.raises(ValueError, match="cumulative target"):
+        train_ppo(
+            _ShortEpisodeEnv(),
+            agent,
+            interaction_budget=2,
+            training_seed_start=101,
+        )
+    with pytest.raises(ValueError, match="checkpointed training schedule"):
+        train_ppo(
+            _ShortEpisodeEnv(),
+            agent,
+            interaction_budget=4,
+            training_seed_start=999,
+        )
 
 
 def test_environment_manifest_is_content_addressed(tmp_path: Path):
@@ -119,6 +217,17 @@ def test_environment_manifest_is_content_addressed(tmp_path: Path):
         "simulation_settings.xml",
         "applications.xml",
     }
+
+
+def test_repository_source_hash_tracks_relative_paths_and_contents(tmp_path: Path):
+    (tmp_path / "src/main/java/example").mkdir(parents=True)
+    (tmp_path / "src/main/resources").mkdir(parents=True)
+    source = tmp_path / "src/main/java/example/Main.java"
+    source.write_text("class Main {}", encoding="utf-8")
+    first = repository_source_sha256(tmp_path)
+    source.write_text("class Main { int value; }", encoding="utf-8")
+    second = repository_source_sha256(tmp_path)
+    assert first != second
 
 
 def test_fair_report_records_paired_seeds_hashes_and_raw_metrics(tmp_path: Path):

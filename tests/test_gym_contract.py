@@ -21,15 +21,17 @@ class DeterministicContractBackend:
 
     def step(self, target, movement):
         self.step_count += 1
+        components = RewardComponents(
+            success=1.0,
+            latency_ratio=0.5,
+            ue_energy_ratio=0.1,
+            uav_energy_ratio=float(np.linalg.norm(movement)) / 10.0,
+            constraint_violations=0.0 if target < 3 + self.number_of_uavs else 1.0,
+        )
         return BackendStep(
             observation=self._observation(),
-            reward_components=RewardComponents(
-                success=1.0,
-                latency_ratio=0.5,
-                ue_energy_ratio=0.1,
-                uav_energy_ratio=float(np.linalg.norm(movement)) / 10.0,
-                constraint_violations=0.0 if target < 3 + self.number_of_uavs else 1.0,
-            ),
+            reward_components=components,
+            reward=UAVMECGymEnv.calculate_reward(components),
             terminated=self.step_count >= 2,
             truncated=False,
             metrics={"target": target},
@@ -60,3 +62,23 @@ def test_reward_is_bounded_and_penalizes_costs():
 
     assert -1.0 <= UAVMECGymEnv.calculate_reward(bad) <= 1.0
     assert UAVMECGymEnv.calculate_reward(good) > UAVMECGymEnv.calculate_reward(bad)
+
+
+def test_environment_preserves_aggregate_backend_reward():
+    backend = DeterministicContractBackend(1)
+    env = UAVMECGymEnv(1, backend)
+    env.reset(seed=1)
+    backend.step = lambda target, movement: BackendStep(
+        observation=backend._observation(),
+        reward_components=RewardComponents(2.0, 0.0, 0.0, 0.0, 0.0),
+        reward=2.0,
+        terminated=True,
+        truncated=False,
+        metrics={"settled_in_transition": 2},
+    )
+    _, reward, terminated, _, info = env.step(
+        {"target": 0, "movement": np.zeros((1, 3), dtype=np.float32)}
+    )
+    assert reward == 2.0
+    assert terminated is True
+    assert info["settled_in_transition"] == 2

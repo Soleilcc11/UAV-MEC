@@ -74,6 +74,17 @@ public class UAV {
      * @return 移动后的新位置
      */
     public double[] updatePosition(double[] direction) {
+        return updatePosition(direction, 1.0);
+    }
+
+    /** Move for an explicit simulation-time interval and charge actual flight time. */
+    public double[] updatePosition(double[] direction, double elapsedSeconds) {
+        if (direction == null || direction.length != 3) {
+            throw new IllegalArgumentException("UAV displacement must contain x, y, and z");
+        }
+        if (!Double.isFinite(elapsedSeconds) || elapsedSeconds < 0.0) {
+            throw new IllegalArgumentException("Movement elapsed time must be non-negative");
+        }
         if (energy <= 0) {
             // 能量耗尽，不能移动
             return position;
@@ -87,12 +98,13 @@ public class UAV {
         );
         
         // 应用速度限制
-        if (distance > speed) {
-            double scale = speed / distance;
+        double maxDistance = speed * elapsedSeconds;
+        if (distance > maxDistance && distance > 0.0) {
+            double scale = maxDistance / distance;
             direction[0] *= scale;
             direction[1] *= scale;
             direction[2] *= scale;
-            distance = speed;
+            distance = maxDistance;
         }
         
         // 更新位置
@@ -109,11 +121,13 @@ public class UAV {
             state = UAVState.HOVERING;
         }
         
-        if (distance > 0) {
-            consumeFlightEnergy(flightPowerPerSecond);
-        } else {
-            consumeHoverEnergy(hoverPowerPerSecond);
-        }
+        double flightSeconds = speed <= 0.0 ? 0.0 : distance / speed;
+        // PROCESS_UAV_TASKS already charges the baseline hover power for every
+        // simulated second. A movement command therefore adds only the flight
+        // power above that baseline, avoiding double charging the same interval.
+        double incrementalFlightPower = Math.max(
+                0.0, flightPowerPerSecond - hoverPowerPerSecond);
+        consumeFlightEnergy(incrementalFlightPower * flightSeconds);
         
         return position;
     }
@@ -373,7 +387,14 @@ public class UAV {
      * 设置速度
      */
     public void setSpeed(double speed) {
+        if (!Double.isFinite(speed) || speed < 0.0) {
+            throw new IllegalArgumentException("UAV speed must be finite and non-negative");
+        }
         this.speed = speed;
+    }
+
+    public double getSpeed() {
+        return speed;
     }
     
     /**

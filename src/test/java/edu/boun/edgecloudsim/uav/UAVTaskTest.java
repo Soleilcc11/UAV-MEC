@@ -51,8 +51,19 @@ class UAVTaskTest {
         uav.updatePosition(new double[] {3.0, 4.0, 0.0});
         uav.processTasks(1.0);
 
-        assertEquals(10.0, uav.getFlightEnergyConsumed(), 1e-9);
+        assertEquals(8.0, uav.getFlightEnergyConsumed(), 1e-9);
         assertEquals(2.0, uav.getHoverEnergyConsumed(), 1e-9);
-        assertEquals(12.0, uav.getTotalEnergyConsumed(), 1e-9);
+        assertEquals(10.0, uav.getTotalEnergyConsumed(), 1e-9);
+    }
+
+    @Test
+    void movementDistanceAndEnergyScaleWithElapsedSimulationTime() {
+        UAV uav = new UAV(0, new double[] {0.0, 0.0, 50.0}, 100.0, 2000.0);
+        uav.configureEnergyModel(10.0, 2.0, 0.001);
+
+        uav.updatePosition(new double[] {100.0, 0.0, 0.0}, 3.0);
+
+        assertEquals(15.0, uav.getPosition()[0], 1e-9);
+        assertEquals(24.0, uav.getFlightEnergyConsumed(), 1e-9);
     }
 }

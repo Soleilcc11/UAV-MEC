@@ -11,7 +11,7 @@ import edu.boun.edgecloudsim.core.SimSettings;
 
 /** Owns one resettable EdgeCloudSim episode for the GymBridge protocol. */
 public class GymBridgeSession implements AutoCloseable {
-    public static final String PROTOCOL_VERSION = "1.0";
+    public static final String PROTOCOL_VERSION = "1.1";
     private final String settingsPath;
     private final String edgeDevicesPath;
     private final String applicationsPath;
@@ -20,6 +20,7 @@ public class GymBridgeSession implements AutoCloseable {
     private GymDecisionCoordinator coordinator;
     private Thread simulationThread;
     private boolean settingsInitialized;
+    private JSONObject provenance;
 
     public GymBridgeSession(String settingsPath, String edgeDevicesPath,
             String applicationsPath, int mobileDeviceCount) {
@@ -65,6 +66,8 @@ public class GymBridgeSession implements AutoCloseable {
         return new JSONObject()
                 .put("observation", result.getObservation())
                 .put("reward_components", result.getRewardComponents())
+                .put("reward", result.getReward())
+                .put("settled_in_transition", result.getSettledInTransition())
                 .put("terminated", result.isTerminated())
                 .put("truncated", result.isTruncated())
                 .put("metrics", result.getMetrics());
@@ -72,9 +75,14 @@ public class GymBridgeSession implements AutoCloseable {
 
     public synchronized JSONObject specification() {
         ensureSettingsInitialized();
+        if (provenance == null) {
+            provenance = GymBridgeProvenance.describe(
+                    settingsPath, edgeDevicesPath, applicationsPath);
+        }
         int uavCount = SimSettings.getInstance().getNumOfUAVs();
         return new JSONObject()
                 .put("protocol_version", PROTOCOL_VERSION)
+                .put("provenance", provenance)
                 .put("decision_cadence", "task_arrival")
                 .put("number_of_uavs", uavCount)
                 .put("action", new JSONObject()

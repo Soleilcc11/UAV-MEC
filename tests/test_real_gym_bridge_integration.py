@@ -93,6 +93,22 @@ def test_real_java_python_bridge_performs_verified_transition() -> None:
         assert info["settled_in_transition"] >= 0
         assert backend.provenance is not None
         assert backend.provenance["runtime"]["classes_current"] is True
+
+        # Close while the Java simulation is blocked on the next decision, then
+        # reconnect to the same server. This guards the budget-cutoff/reset race.
+        env.close()
+        env = None
+        resumed_backend = JavaGymBridgeBackend(
+            port=port,
+            expected_number_of_uavs=2,
+            expected_environment_manifest=environment,
+            expected_git_commit_sha=current_commit_sha(repository),
+            expected_source_tree_sha256=repository_source_sha256(repository),
+        )
+        env = UAVMECGymEnv(2, resumed_backend)
+        resumed_observation, resumed_info = env.reset(seed=2027)
+        assert resumed_info["seed"] == 2027
+        assert env.observation_space.contains(resumed_observation)
     finally:
         if env is not None:
             env.close()

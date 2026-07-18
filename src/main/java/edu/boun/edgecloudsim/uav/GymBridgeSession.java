@@ -123,9 +123,13 @@ public class GymBridgeSession implements AutoCloseable {
         if (CloudSim.running()) CloudSim.stopSimulation();
         if (simulationThread != null) {
             try {
-                simulationThread.join(2000);
+                simulationThread.join(5000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+            }
+            if (simulationThread.isAlive()) {
+                throw new IllegalStateException(
+                        "GymBridge simulation thread did not stop within 5 seconds");
             }
         }
         manager = null;

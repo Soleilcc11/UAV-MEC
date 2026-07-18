@@ -52,6 +52,9 @@ public class GymDecisionCoordinator {
     }
 
     public synchronized Decision onTaskArrival(TaskProperty task) {
+        if (closed) {
+            return null;
+        }
         if (task == null) {
             throw new IllegalArgumentException("Gym task arrival cannot be null");
         }
@@ -252,6 +255,10 @@ public class GymDecisionCoordinator {
 
     public synchronized void close() {
         closed = true;
+        currentTask = null;
+        decisionForSimulation = null;
+        initialDecisionReady = false;
+        stepResultReady = false;
         notifyAll();
     }
 

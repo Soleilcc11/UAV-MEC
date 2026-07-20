@@ -2,6 +2,7 @@ package edu.boun.edgecloudsim.uav;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -111,10 +112,135 @@ class GymBridgeConcurrencyIntegrationTest {
             simulationThread.join(5_000);
             assertFalse(simulationThread.isAlive());
         } finally {
-            coordinator.close();
             if (CloudSim.running()) {
-                CloudSim.stopSimulation();
+                CloudSim.terminateSimulation();
             }
+            coordinator.close();
+            simulationThread.join(5_000);
+            SimManager.resetInstance();
+        }
+    }
+
+    @Test
+    @Timeout(15)
+    void maskedTargetProducesAConstraintFailureInsteadOfAProtocolError()
+            throws Exception {
+        SimSettings settings = SimSettings.getInstance();
+        settings.initialize(
+                "src/test/resources/config/simulation_settings.xml",
+                "src/test/resources/config/edge_devices.xml",
+                "src/test/resources/config/applications.xml");
+
+        SimManager.resetInstance();
+        CloudSim.init(1, Calendar.getInstance(), false);
+        UAVMECScenarioFactory factory = new UAVMECScenarioFactory(
+                1, "SINGLE_TIER", "RANDOM_FIT") {
+            @Override
+            public LoadGeneratorModel getLoadGeneratorModel() {
+                return new LoadGeneratorModel(1, 60, "SINGLE_TIER") {
+                    @Override
+                    public void initializeModel() {
+                        taskList = new ArrayList<>();
+                        taskList.add(new TaskProperty(
+                                1.0, 0, 0, 1, 1_000, 100, 20));
+                    }
+
+                    @Override
+                    public int getTaskTypeOfDevice(int deviceId) {
+                        return 0;
+                    }
+                };
+            }
+        };
+        SimManager manager = SimManager.getInstance();
+        manager.initialize(factory, 1, "SINGLE_TIER", "RANDOM_FIT");
+        GymDecisionCoordinator coordinator = new GymDecisionCoordinator(manager);
+        manager.setGymCoordinator(coordinator);
+
+        Thread simulationThread = new Thread(
+                CloudSim::startSimulation, "gym-masked-target-test-simulation");
+        simulationThread.start();
+        try {
+            JSONObject initial = coordinator.awaitInitialObservation(5_000);
+            assertEquals(0, initial.getJSONArray("action_mask").getInt(0));
+
+            // Local execution is disabled in this scenario. The action is still
+            // a valid Discrete value and must become a failed transition with a
+            // constraint penalty, not an exception or a fallback target.
+            coordinator.beginDecision(0, zeroMovements(settings.getNumOfUAVs()));
+            GymDecisionCoordinator.StepResult terminal =
+                    coordinator.awaitStepResult(5_000);
+
+            assertTrue(terminal.isTerminated());
+            assertFalse(terminal.isTruncated());
+            assertEquals(1, terminal.getSettledInTransition());
+            assertEquals(1, terminal.getMetrics().getInt("settled_tasks"));
+            assertEquals(0, terminal.getMetrics().getInt("successful_tasks"));
+            assertEquals(1,
+                    terminal.getMetrics().getInt("constraint_violations"));
+            assertEquals(1.0, terminal.getRewardComponents()
+                    .getDouble("constraint_violations"), 1e-12);
+            assertTrue(terminal.getReward() <= -0.30);
+
+            simulationThread.join(5_000);
+            assertFalse(simulationThread.isAlive());
+        } finally {
+            if (CloudSim.running()) {
+                CloudSim.terminateSimulation();
+            }
+            coordinator.close();
+            simulationThread.join(5_000);
+            SimManager.resetInstance();
+        }
+    }
+
+    @Test
+    @Timeout(15)
+    void emptyWorkloadFailsResetImmediatelyInsteadOfTimingOut() throws Exception {
+        SimSettings settings = SimSettings.getInstance();
+        settings.initialize(
+                "src/test/resources/config/simulation_settings.xml",
+                "src/test/resources/config/edge_devices.xml",
+                "src/test/resources/config/applications.xml");
+
+        SimManager.resetInstance();
+        CloudSim.init(1, Calendar.getInstance(), false);
+        UAVMECScenarioFactory factory = new UAVMECScenarioFactory(
+                1, "SINGLE_TIER", "RANDOM_FIT") {
+            @Override
+            public LoadGeneratorModel getLoadGeneratorModel() {
+                return new LoadGeneratorModel(1, 60, "SINGLE_TIER") {
+                    @Override
+                    public void initializeModel() {
+                        taskList = new ArrayList<>();
+                    }
+
+                    @Override
+                    public int getTaskTypeOfDevice(int deviceId) {
+                        return 0;
+                    }
+                };
+            }
+        };
+        SimManager manager = SimManager.getInstance();
+        manager.initialize(factory, 1, "SINGLE_TIER", "RANDOM_FIT");
+        GymDecisionCoordinator coordinator = new GymDecisionCoordinator(manager);
+        manager.setGymCoordinator(coordinator);
+        Thread simulationThread = new Thread(
+                CloudSim::startSimulation, "gym-empty-workload-test-simulation");
+        simulationThread.start();
+        try {
+            IllegalStateException error = assertThrows(
+                    IllegalStateException.class,
+                    () -> coordinator.awaitInitialObservation(5_000));
+            assertTrue(error.getMessage().contains("before the first task-arrival"));
+            simulationThread.join(5_000);
+            assertFalse(simulationThread.isAlive());
+        } finally {
+            if (CloudSim.running()) {
+                CloudSim.terminateSimulation();
+            }
+            coordinator.close();
             simulationThread.join(5_000);
             SimManager.resetInstance();
         }

@@ -160,7 +160,7 @@ public class UAV {
      * @return 是否成功添加
      */
     public boolean addTask(Task task) {
-        if (taskQueue.size() >= 50) { // 假设最大队列长度为50
+        if (task == null || energy <= 0 || taskQueue.size() >= 50) { // 假设最大队列长度为50
             return false;
         }
         boolean accepted = taskQueue.offer(task);
@@ -168,6 +168,14 @@ public class UAV {
             maxObservedQueueLength = Math.max(maxObservedQueueLength, taskQueue.size());
         }
         return accepted;
+    }
+
+    /** Remove one queued task after its backing EdgeCloudSim task is failed. */
+    public boolean cancelTask(String taskId) {
+        if (taskId == null) {
+            return false;
+        }
+        return taskQueue.removeIf(task -> taskId.equals(task.getId()));
     }
     
     /**

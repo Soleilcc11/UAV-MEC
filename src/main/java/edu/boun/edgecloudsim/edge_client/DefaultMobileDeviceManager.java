@@ -258,7 +258,7 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 						CloudSim.clock(),
 						SimSettings.VM_TYPES.CLOUD_VM.ordinal(),
 						NETWORK_DELAY_TYPES.WAN_DELAY);
-				markFailed(task);
+				failAndSettle(task);
 			}
 		}
 		else if(target.getType() == ExecutionTarget.Type.EDGE) {
@@ -276,7 +276,7 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 						CloudSim.clock(),
 						SimSettings.VM_TYPES.EDGE_VM.ordinal(),
 						NETWORK_DELAY_TYPES.WLAN_DELAY);
-				markFailed(task);
+				failAndSettle(task);
 			}
 		}
 		else if(target.getType() == ExecutionTarget.Type.UAV) {
@@ -292,14 +292,14 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 				SimLogger.getInstance().rejectedDueToBandwidth(
 						task.getCloudletId(), CloudSim.clock(),
 						SimSettings.VM_TYPES.EDGE_VM.ordinal(), NETWORK_DELAY_TYPES.WLAN_DELAY);
-				markFailed(task);
+				failAndSettle(task);
 			}
 		}
 		else {
 			SimLogger.printLine("Execution target is not connected to a Broker resource yet: " + target);
 			SimLogger.getInstance().rejectedDueToVMCapacity(
 					task.getCloudletId(), CloudSim.clock(), SimSettings.VM_TYPES.MOBILE_VM.ordinal());
-			markFailed(task);
+			failAndSettle(task);
 		}
 		return task;
 	}
@@ -341,7 +341,16 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 			failAndSettle(task);
 		}
 	}
-	
+
+	/** Called by UAVManager when a queued EdgeCloudSim task cannot continue. */
+	public void uavTaskFailed(Task task) {
+		boolean wasSubmitted = getCloudletSubmittedList().remove(task);
+		if (wasSubmitted && cloudletsSubmitted > 0) {
+			cloudletsSubmitted--;
+		}
+		failAndSettle(task);
+	}
+
 	private void submitTaskToVm(Task task, double delay, int datacenterId) {
 		//select a VM
 		Vm selectedVM = SimManager.getInstance().getEdgeOrchestrator().getVmToOffload(task, datacenterId);

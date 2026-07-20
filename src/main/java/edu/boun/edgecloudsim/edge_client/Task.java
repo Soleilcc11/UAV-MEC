@@ -27,6 +27,7 @@ public class Task extends Cloudlet {
 	private int vmIndex;
 	private int datacenterId;
 	private ExecutionTarget executionTarget;
+	private boolean terminalSettlementNotified;
 
 	public Task(int _mobileDeviceId, int cloudletId, long cloudletLength, int pesNumber,
 			long cloudletFileSize, long cloudletOutputSize,
@@ -93,7 +94,26 @@ public class Task extends Cloudlet {
 	public ExecutionTarget getExecutionTarget() {
 		return executionTarget;
 	}
-	
+
+	/**
+	 * Claims the single terminal callback for this task.
+	 *
+	 * <p>Several terminal paths are asynchronous, so keeping the claim on the
+	 * task prevents a duplicate Gym transition without retaining a global
+	 * task-id set.</p>
+	 */
+	public synchronized boolean claimTerminalSettlementNotification() {
+		if (terminalSettlementNotified) {
+			return false;
+		}
+		terminalSettlementNotified = true;
+		return true;
+	}
+
+	public synchronized boolean isTerminalSettlementNotified() {
+		return terminalSettlementNotified;
+	}
+
 	public double getCreationTime() {
 		return creationTime;
 	}

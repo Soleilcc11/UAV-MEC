@@ -118,9 +118,17 @@ public class GymBridgeSession implements AutoCloseable {
     }
 
     private void closeEpisode() {
+        if (CloudSim.running()) {
+            // CloudSim 4.0's stopSimulation() only prints a message; it does
+            // not stop the event loop. Clear the running flag before releasing
+            // a simulation thread blocked in the coordinator. Unlike the
+            // sticky abrupt-termination flag, this remains safe if the episode
+            // happened to finish concurrently. The coordinator monitor supplies
+            // the cross-thread happens-before edge for CloudSim's non-volatile
+            // state.
+            CloudSim.terminateSimulation();
+        }
         if (coordinator != null) coordinator.close();
-        if (CloudSim.isPaused()) CloudSim.resumeSimulation();
-        if (CloudSim.running()) CloudSim.stopSimulation();
         if (simulationThread != null) {
             try {
                 simulationThread.join(5000);

@@ -50,8 +50,12 @@ class JavaGymBridgeBackend:
         assert self.specification is not None
         return int(self.specification["number_of_uavs"])
 
-    def reset(self, seed: int | None) -> tuple[Observation, dict[str, Any]]:
-        response = self._request("reset", seed=0 if seed is None else int(seed))
+    def reset(self, seed: int) -> tuple[Observation, dict[str, Any]]:
+        if seed is None:
+            raise ValueError(
+                "JavaGymBridgeBackend requires an explicit episode seed"
+            )
+        response = self._request("reset", seed=int(seed))
         return response["observation"], dict(response["info"])
 
     def step(self, target: int, movement: np.ndarray) -> BackendStep:

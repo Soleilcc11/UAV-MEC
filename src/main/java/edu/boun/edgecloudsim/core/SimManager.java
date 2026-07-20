@@ -308,6 +308,10 @@ public class SimManager extends SimEntity {
             uavManager.moveUav(
                     i, movements[i], decision.getMovementElapsedSeconds());
         }
+        if (decision.isConstraintViolation()) {
+            gymCoordinator.onTaskSubmitted(null, decision);
+            return;
+        }
         if (mobileDeviceManager instanceof edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager) {
             edu.boun.edgecloudsim.edge_client.Task task =
                     ((edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager) mobileDeviceManager)
@@ -321,7 +325,8 @@ public class SimManager extends SimEntity {
     }
 
     public void notifyGymTaskSettled(edu.boun.edgecloudsim.edge_client.Task task) {
-        if (gymCoordinator != null) {
+        if (gymCoordinator != null && task != null
+                && task.claimTerminalSettlementNotification()) {
             gymCoordinator.onTaskSettled(task);
         }
     }

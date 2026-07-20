@@ -5,6 +5,7 @@ import socketserver
 import threading
 
 import numpy as np
+import pytest
 
 from uav_mec_gym import JavaGymBridgeBackend
 
@@ -90,3 +91,10 @@ def test_java_backend_performs_versioned_round_trip():
         backend.close()
         server.shutdown()
         server.server_close()
+
+
+def test_java_backend_requires_an_explicit_episode_seed():
+    backend = JavaGymBridgeBackend()
+
+    with pytest.raises(ValueError, match="explicit episode seed"):
+        backend.reset(None)

@@ -78,9 +78,14 @@ public class GymDecisionCoordinator {
 
     public synchronized JSONObject awaitInitialObservation(long timeoutMillis)
             throws InterruptedException {
-        waitFor(() -> initialDecisionReady || terminated || closed, timeoutMillis);
+        waitFor(() -> initialDecisionReady || terminated || truncated || closed,
+                timeoutMillis);
         if (closed) {
             throw new IllegalStateException("Gym session is closed");
+        }
+        if (!initialDecisionReady) {
+            throw new IllegalStateException(
+                    "Gym episode ended before the first task-arrival decision");
         }
         return buildObservation();
     }
@@ -90,9 +95,10 @@ public class GymDecisionCoordinator {
             throw new IllegalStateException("No Gymnasium decision is pending");
         }
         int[] mask = buildActionMask(currentTask);
-        if (targetIndex < 0 || targetIndex >= mask.length || mask[targetIndex] == 0) {
-            throw new IllegalArgumentException("Target is disabled by the action mask");
+        if (targetIndex < 0 || targetIndex >= mask.length) {
+            throw new IllegalArgumentException("Unknown Gym execution target: " + targetIndex);
         }
+        boolean constraintViolation = mask[targetIndex] == 0;
         ExecutionTarget target = mapTarget(targetIndex);
         double decisionTime = CloudSim.clock();
         double movementElapsedSeconds = Math.max(
@@ -103,7 +109,8 @@ public class GymDecisionCoordinator {
                 copyMovements(movements, movementElapsedSeconds),
                 movementElapsedSeconds,
                 decisionTime,
-                deadlineSeconds(currentTask));
+                deadlineSeconds(currentTask),
+                constraintViolation);
         lastMovementDecisionTime = decisionTime;
         currentTask = null;
         initialDecisionReady = false;
@@ -161,7 +168,8 @@ public class GymDecisionCoordinator {
                 ueEnergyRatio,
                 latencySeconds,
                 decision.deadlineSeconds,
-                decision.ueEnergyJoules);
+                decision.ueEnergyJoules,
+                decision.constraintViolation ? 1 : 0);
         settledTaskCount++;
         if (success) {
             successfulTaskCount++;
@@ -597,16 +605,19 @@ public class GymDecisionCoordinator {
         private double ueEnergyJoules;
         private double reward;
         private int settledCount;
+        private int constraintViolations;
 
         private void add(double taskSuccess, double taskLatencyRatio,
                 double taskUeEnergyRatio, double taskLatencySeconds,
-                double taskDeadlineSeconds, double taskUeEnergyJoules) {
+                double taskDeadlineSeconds, double taskUeEnergyJoules,
+                int taskConstraintViolations) {
             success += taskSuccess;
             latencyRatio += taskLatencyRatio;
             ueEnergyRatio += taskUeEnergyRatio;
             latencySeconds += taskLatencySeconds;
             deadlineSeconds += taskDeadlineSeconds;
             ueEnergyJoules += taskUeEnergyJoules;
+            constraintViolations += Math.max(0, taskConstraintViolations);
             reward += boundedTaskReward(taskSuccess, taskLatencyRatio, taskUeEnergyRatio);
             settledCount++;
         }
@@ -615,7 +626,9 @@ public class GymDecisionCoordinator {
                 double uavBudgetJoules, int intervalConstraintViolations) {
             double uavEnergyRatio = intervalUavEnergyJoules
                     / Math.max(1.0, uavBudgetJoules);
-            double constraintViolations = intervalConstraintViolations > 0 ? 1.0 : 0.0;
+            int totalConstraintViolations = constraintViolations
+                    + Math.max(0, intervalConstraintViolations);
+            double boundedConstraintViolations = totalConstraintViolations > 0 ? 1.0 : 0.0;
             JSONObject components = settledCount == 0
                     ? zeroRewardComponents()
                     : new JSONObject()
@@ -623,17 +636,17 @@ public class GymDecisionCoordinator {
                             .put("latency_ratio", latencyRatio)
                             .put("ue_energy_ratio", ueEnergyRatio)
                             .put("uav_energy_ratio", uavEnergyRatio)
-                            .put("constraint_violations", constraintViolations);
+                            .put("constraint_violations", boundedConstraintViolations);
             if (settledCount == 0) {
                 components.put("uav_energy_ratio", uavEnergyRatio)
-                        .put("constraint_violations", constraintViolations);
+                        .put("constraint_violations", boundedConstraintViolations);
             }
             JSONObject physical = rawPhysicalMetrics(
                     latencySeconds, deadlineSeconds, ueEnergyJoules,
-                    intervalUavEnergyJoules, intervalConstraintViolations);
+                    intervalUavEnergyJoules, totalConstraintViolations);
             double intervalReward = reward
                     - 0.20 * Math.min(Math.max(uavEnergyRatio, 0.0), 2.0)
-                    - 0.30 * Math.min(Math.max(constraintViolations, 0.0), 1.0);
+                    - 0.30 * Math.min(Math.max(boundedConstraintViolations, 0.0), 1.0);
             TransitionSnapshot snapshot = new TransitionSnapshot(
                     components, physical, intervalReward, settledCount);
             success = 0.0;
@@ -644,6 +657,7 @@ public class GymDecisionCoordinator {
             ueEnergyJoules = 0.0;
             reward = 0.0;
             settledCount = 0;
+            constraintViolations = 0;
             return snapshot;
         }
     }
@@ -689,22 +703,26 @@ public class GymDecisionCoordinator {
         private final double movementElapsedSeconds;
         private final double decisionTime;
         private final double deadlineSeconds;
+        private final boolean constraintViolation;
         private double ueEnergyJoules;
 
         private Decision(TaskProperty task, ExecutionTarget target, double[][] movements,
-                double movementElapsedSeconds, double decisionTime, double deadlineSeconds) {
+                double movementElapsedSeconds, double decisionTime, double deadlineSeconds,
+                boolean constraintViolation) {
             this.task = task;
             this.target = target;
             this.movements = movements;
             this.movementElapsedSeconds = movementElapsedSeconds;
             this.decisionTime = decisionTime;
             this.deadlineSeconds = deadlineSeconds;
+            this.constraintViolation = constraintViolation;
         }
 
         public TaskProperty getTask() { return task; }
         public ExecutionTarget getTarget() { return target; }
         public double[][] getMovements() { return movements; }
         public double getMovementElapsedSeconds() { return movementElapsedSeconds; }
+        public boolean isConstraintViolation() { return constraintViolation; }
     }
 
     public static final class StepResult {

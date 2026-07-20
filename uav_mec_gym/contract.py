@@ -31,7 +31,7 @@ class BackendStep:
 
 
 class GymBackend(Protocol):
-    def reset(self, seed: int | None) -> tuple[Observation, Mapping[str, Any]]: ...
+    def reset(self, seed: int) -> tuple[Observation, Mapping[str, Any]]: ...
 
     def step(self, target: int, movement: np.ndarray) -> BackendStep: ...
 
@@ -83,8 +83,28 @@ class UAVMECGymEnv(gym.Env[dict[str, np.ndarray], dict[str, Any]]):
         options: dict[str, Any] | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         super().reset(seed=seed)
-        observation, info = self.backend.reset(seed)
-        return self._validate_observation(observation), dict(info)
+        # Gymnasium keeps ``np_random`` alive across reset(seed=None).  Derive
+        # an explicit Java-compatible seed from that stream instead of mapping
+        # every unseeded episode to zero.  An explicit caller seed remains the
+        # simulator seed required by the frozen reproducibility contract.
+        episode_seed = (
+            int(seed)
+            if seed is not None
+            else int(
+                self.np_random.integers(
+                    0, np.iinfo(np.int64).max, dtype=np.int64
+                )
+            )
+        )
+        observation, backend_info = self.backend.reset(episode_seed)
+        info = dict(backend_info)
+        if "seed" not in info:
+            raise ValueError("Backend reset omitted the actual episode seed")
+        echoed_seed = info["seed"]
+        if int(echoed_seed) != episode_seed:
+            raise ValueError("Backend reset did not echo the actual episode seed")
+        info["seed"] = episode_seed
+        return self._validate_observation(observation), info
 
     def step(
         self, action: dict[str, Any]

@@ -24,7 +24,7 @@ This avoids a variable-length list of offloading decisions and preserves a fixed
   - movement energy is based on actual bounded flight distance/time, while the simulation tick accounts for baseline hover energy
   - physical and energy bounds are enforced by the backend
 
-The observation includes `action_mask`; selecting a masked target is a constraint violation, not an implicit fallback.
+The observation includes `action_mask`; selecting a masked target is a constraint violation, not an implicit fallback. A masked but in-range target is accepted as one failed task transition: movement is still applied, the disabled target is not submitted, and the transition records one constraint violation. Out-of-range targets remain protocol errors.
 
 ## Observation
 
@@ -65,6 +65,8 @@ The reward returned at a decision epoch is the sum of task contributions that se
 ## Seeding
 
 `reset(seed)` must recreate the complete Java simulation and propagate the seed to workload generation, mobility, UAV initialization, algorithm sampling, and all other random sources. Repeating `reset(seed)` and the same action sequence must reproduce observations, rewards, terminal flags, and physical metrics.
+
+After an explicit seed initializes Gymnasium's RNG, `reset(seed=None)` derives a new non-negative 63-bit Java episode seed from that persistent RNG stream and returns the actual seed in `info["seed"]`. Re-seeding with the same explicit value restarts the same derived episode-seed sequence. A workload with no task-arrival decision is rejected during reset instead of waiting for a decision timeout.
 
 ## Runtime provenance
 

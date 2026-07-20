@@ -11,9 +11,11 @@ from uav_mec_gym.experiment import (
     build_fair_evaluation_report,
     environment_manifest,
     repository_source_sha256,
+    train_td3,
     train_ppo,
 )
 from uav_mec_gym.ppo import MixedActionPPO, PPOConfig
+from uav_mec_gym.td3 import MixedActionTD3, TD3Config
 
 
 class _ShortEpisodeEnv:
@@ -85,6 +87,21 @@ def _agent(seed=7):
     )
 
 
+def _td3_agent(seed=7):
+    return MixedActionTD3(
+        2,
+        TD3Config(
+            hidden_sizes=(8,),
+            batch_size=2,
+            replay_capacity=16,
+            learning_starts=2,
+            policy_delay=2,
+            normalize_observations=False,
+        ),
+        seed=seed,
+    )
+
+
 def test_training_uses_exact_interaction_budget_and_flushes_tail():
     agent = _agent()
 
@@ -107,6 +124,28 @@ def test_training_uses_exact_interaction_budget_and_flushes_tail():
     assert agent.training_seed_start == 101
     assert agent.training_episode_count == 2
     assert agent.next_training_seed == 103
+
+
+def test_td3_training_uses_exact_budget_and_records_online_updates():
+    agent = _td3_agent()
+
+    episodes, updates = train_td3(
+        _ShortEpisodeEnv(),
+        agent,
+        interaction_budget=3,
+        training_seed_start=1001,
+    )
+
+    assert agent.training_steps == 3
+    assert sum(episode["steps"] for episode in episodes) == 3
+    assert [episode["seed"] for episode in episodes] == [1001, 1002]
+    assert episodes[-1]["truncated"] is True
+    assert episodes[-1]["transitions"][-1]["interaction_budget_truncated"] is True
+    assert episodes[0]["transitions"][0]["warmup_random"] is True
+    assert len(updates) == 2
+    assert agent.update_count == 2
+    assert agent.actor_update_count == 1
+    assert agent.next_training_seed == 1003
 
 
 def test_checkpoint_resume_matches_uninterrupted_training_and_advances_seeds(
@@ -277,3 +316,29 @@ def test_fair_report_rejects_fewer_than_five_paired_seeds(tmp_path: Path):
             commit_sha="abc123",
             checkpoint_path=checkpoint,
         )
+
+
+def test_fair_report_accepts_td3_as_the_single_learned_candidate(tmp_path: Path):
+    checkpoint = tmp_path / "td3.pt"
+    agent = _td3_agent(seed=31)
+    agent.save_checkpoint(checkpoint)
+
+    report = build_fair_evaluation_report(
+        _ShortEpisodeEnv(),
+        [RandomMaskedPolicy(2), MinimumEstimatedDelayPolicy(2), agent],
+        seeds=list(range(301, 311)),
+        split="heldout",
+        environment={"files": [], "sha256": "environment-hash"},
+        commit_sha="abc123",
+        checkpoint_path=checkpoint,
+    )
+
+    assert report["checkpoint"]["sha256"]
+    assert report["training_interactions"]["mixed_action_td3"] == 0
+    assert "minimum_estimated_delay" in report["paired_candidate_minus_reference"]
+    candidate_rows = [
+        row for row in report["episodes"] if row["policy"] == "mixed_action_td3"
+    ]
+    assert len(candidate_rows) == 10
+    assert all(row["checkpoint_sha256"] for row in candidate_rows)
+    assert report["audit"]["interpretation"].startswith("descriptive smoke evidence")

@@ -32,6 +32,7 @@ from .evaluation import (
     summarize_values,
 )
 from .ppo import MixedActionPPO, PPOConfig
+from .td3 import MixedActionTD3, TD3Config
 
 
 RESULT_FORMAT_VERSION = 2
@@ -299,6 +300,104 @@ def train_ppo(
     return episodes, updates
 
 
+def train_td3(
+    env: gym.Env,
+    agent: MixedActionTD3,
+    *,
+    interaction_budget: int,
+    training_seed_start: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, float]]]:
+    """Train TD3 to a cumulative real-environment interaction target."""
+
+    if interaction_budget <= 0:
+        raise ValueError("interaction_budget must be positive")
+    starting_training_steps = int(agent.training_steps)
+    if interaction_budget <= starting_training_steps:
+        raise ValueError(
+            "interaction_budget is a cumulative target and must exceed the "
+            f"checkpoint's {starting_training_steps} training steps"
+        )
+    episodes: list[dict[str, Any]] = []
+    updates: list[dict[str, float]] = []
+
+    while agent.training_steps < interaction_budget:
+        seed = agent.reserve_training_episode_seed(training_seed_start)
+        observation, reset_info = env.reset(seed=seed)
+        if int(reset_info.get("seed", seed)) != seed:
+            raise ValueError("GymBridge reset did not echo the requested seed")
+        step_rows: list[dict[str, Any]] = []
+        episode_terminated = False
+        episode_truncated = False
+
+        while not (episode_terminated or episode_truncated):
+            sample = agent.sample_action(
+                observation, deterministic=False, update_normalizer=True
+            )
+            next_observation, reward, terminated, truncated, info = env.step(
+                sample.action
+            )
+            expected_global_step = int(agent.training_steps) + 1
+            budget_truncated = (
+                expected_global_step >= interaction_budget
+                and not (terminated or truncated)
+            )
+            learning_truncated = bool(truncated or budget_truncated)
+            agent.store_transition(
+                sample,
+                float(reward),
+                next_observation,
+                bool(terminated),
+                learning_truncated,
+            )
+            global_step = int(agent.training_steps)
+            if global_step != expected_global_step:
+                raise AssertionError("TD3 training step counter did not advance once")
+            update = agent.update()
+            if update is not None:
+                updates.append(update)
+
+            physical = _physical_step_metrics(info)
+            components = _reward_components(info)
+            step_rows.append(
+                {
+                    "global_step": global_step,
+                    "reward": float(reward),
+                    "target": int(sample.action["target"]),
+                    "movement": np.asarray(
+                        sample.action["movement"], dtype=np.float32
+                    ).tolist(),
+                    "warmup_random": bool(sample.warmup_random),
+                    "terminated": bool(terminated),
+                    "truncated": learning_truncated,
+                    "environment_truncated": bool(truncated),
+                    "interaction_budget_truncated": budget_truncated,
+                    "settled_tasks": int(info["settled_tasks"]),
+                    "total_tasks": int(info["total_tasks"]),
+                    "simulation_time": float(info["simulation_time"]),
+                    "reward_components": components,
+                    "physical_metrics": physical,
+                }
+            )
+            observation = next_observation
+            episode_terminated = bool(terminated)
+            episode_truncated = learning_truncated
+
+        episodes.append(
+            _finalize_training_episode(
+                seed=seed,
+                step_rows=step_rows,
+                terminated=episode_terminated,
+                truncated=episode_truncated,
+            )
+        )
+
+    if agent.training_steps != interaction_budget:
+        raise AssertionError(
+            "TD3 training step counter diverged from cumulative interaction target"
+        )
+    return episodes, updates
+
+
 def audit_episode_results(results: Iterable[EpisodeResult]) -> None:
     rows = list(results)
     if not rows:
@@ -328,7 +427,7 @@ def audit_episode_results(results: Iterable[EpisodeResult]) -> None:
 
 
 def _policy_configuration(policy: Any) -> dict[str, Any]:
-    if isinstance(policy, MixedActionPPO):
+    if isinstance(policy, (MixedActionPPO, MixedActionTD3)):
         return asdict(policy.config)
     if isinstance(policy, RandomMaskedPolicy):
         return {"target": "uniform_over_action_mask", "movement": "uniform_-1_1"}
@@ -353,8 +452,15 @@ def build_fair_evaluation_report(
         raise ValueError("Fair evaluation requires at least five unique paired seeds")
     if split not in {"validation", "heldout"}:
         raise ValueError("split must be validation or heldout")
-    if not policies or not any(isinstance(policy, MixedActionPPO) for policy in policies):
-        raise ValueError("Fair evaluation must include the migrated PPO policy")
+    candidates = [
+        policy
+        for policy in policies
+        if isinstance(policy, (MixedActionPPO, MixedActionTD3))
+    ]
+    if len(candidates) != 1:
+        raise ValueError("Fair evaluation must include exactly one learned candidate")
+    candidate = candidates[0]
+    candidate_name = candidate.name
 
     checkpoint = Path(checkpoint_path)
     checkpoint_hash = file_sha256(checkpoint)
@@ -373,7 +479,9 @@ def build_fair_evaluation_report(
         config = algorithm_configs[policy_name]
         policy = next(item for item in policies if item.name == policy_name)
         training_interactions = (
-            int(policy.training_steps) if isinstance(policy, MixedActionPPO) else 0
+            int(policy.training_steps)
+            if isinstance(policy, (MixedActionPPO, MixedActionTD3))
+            else 0
         )
         for result in results:
             row = asdict(result)
@@ -383,9 +491,9 @@ def build_fair_evaluation_report(
                     "algorithm_config": config,
                     "algorithm_config_hash": canonical_hash(config),
                     "environment_config_hash": environment["sha256"],
-                    "checkpoint": str(checkpoint) if policy_name == "mixed_action_ppo" else None,
+                    "checkpoint": str(checkpoint) if policy_name == candidate_name else None,
                     "checkpoint_sha256": checkpoint_hash
-                    if policy_name == "mixed_action_ppo"
+                    if policy_name == candidate_name
                     else None,
                     "training_interactions": training_interactions,
                     "git_commit_sha": commit_sha,
@@ -407,15 +515,15 @@ def build_fair_evaluation_report(
         )
         summaries[policy_name] = policy_summary
 
-    ppo_results = results_by_policy["mixed_action_ppo"]
+    candidate_results = results_by_policy[candidate_name]
     paired: dict[str, Any] = {}
     for reference_name, reference_results in results_by_policy.items():
-        if reference_name == "mixed_action_ppo":
+        if reference_name == candidate_name:
             continue
         paired[reference_name] = {
             metric: asdict(
                 summarize_paired_seed_differences(
-                    reference_results, ppo_results, metric
+                    reference_results, candidate_results, metric
                 )
             )
             for metric in SUMMARY_METRICS
@@ -437,7 +545,7 @@ def build_fair_evaluation_report(
         },
         "training_interactions": {
             policy.name: int(policy.training_steps)
-            if isinstance(policy, MixedActionPPO)
+            if isinstance(policy, (MixedActionPPO, MixedActionTD3))
             else 0
             for policy in policies
         },
@@ -455,7 +563,12 @@ def build_fair_evaluation_report(
                 "terminal simulation time is positive",
                 "raw physical metrics are finite and non-negative",
             ],
-            "interpretation": "descriptive smoke evidence; no superiority claim",
+            "interpretation": (
+                "formal paired evaluation with uncertainty; claims still require "
+                "independent training-seed replication"
+                if len(unique_seeds) >= 10 and int(candidate.training_steps) >= 1024
+                else "descriptive smoke evidence; no superiority claim"
+            ),
         },
     }
 
@@ -484,7 +597,7 @@ def _add_shared_bridge_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Train and fairly evaluate mixed-action PPO on GymBridge"
+        description="Train and fairly evaluate mixed-action RL on GymBridge"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -521,9 +634,50 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-bootstrap-truncated", action="store_true"
     )
 
+    td3_parser = subparsers.add_parser("train-td3")
+    _add_shared_bridge_arguments(td3_parser)
+    td3_parser.add_argument("--checkpoint", type=Path, required=True)
+    td3_parser.add_argument(
+        "--resume-from",
+        type=Path,
+        help=(
+            "TD3 checkpoint to continue; its algorithm config, replay, and RNG "
+            "state are authoritative"
+        ),
+    )
+    td3_parser.add_argument(
+        "--interaction-budget",
+        type=int,
+        required=True,
+        help="Cumulative target for agent.training_steps",
+    )
+    td3_parser.add_argument("--training-seed-start", type=int, required=True)
+    td3_parser.add_argument(
+        "--validation-seeds", type=int, nargs="+", default=list(range(201, 211))
+    )
+    td3_parser.add_argument(
+        "--heldout-seeds", type=int, nargs="+", default=list(range(301, 311))
+    )
+    td3_parser.add_argument("--batch-size", type=int, default=256)
+    td3_parser.add_argument("--replay-capacity", type=int, default=100_000)
+    td3_parser.add_argument("--learning-starts", type=int, default=1_000)
+    td3_parser.add_argument("--policy-delay", type=int, default=2)
+    td3_parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[256, 256])
+    td3_parser.add_argument("--actor-learning-rate", type=float, default=3e-4)
+    td3_parser.add_argument("--critic-learning-rate", type=float, default=3e-4)
+    td3_parser.add_argument("--policy-noise", type=float, default=0.2)
+    td3_parser.add_argument("--noise-clip", type=float, default=0.5)
+    td3_parser.add_argument("--exploration-noise", type=float, default=0.1)
+    td3_parser.add_argument("--discrete-exploration", type=float, default=0.1)
+    td3_parser.add_argument("--target-temperature", type=float, default=1.0)
+    td3_parser.add_argument("--no-bootstrap-truncated", action="store_true")
+
     evaluate_parser = subparsers.add_parser("evaluate")
     _add_shared_bridge_arguments(evaluate_parser)
     evaluate_parser.add_argument("--checkpoint", type=Path, required=True)
+    evaluate_parser.add_argument(
+        "--algorithm", choices=["ppo", "td3"], default="ppo"
+    )
     evaluate_parser.add_argument("--split", choices=["validation", "heldout"], required=True)
     evaluate_parser.add_argument(
         "--seeds", type=int, nargs="+", required=True
@@ -547,18 +701,22 @@ def main() -> None:
     )
     env = UAVMECGymEnv(args.uavs, backend)
     try:
-        if args.command == "train-ppo":
+        if args.command in {"train-ppo", "train-td3"}:
             resume_source: dict[str, str] | None = None
             if args.resume_from is not None:
                 resume_source = {
                     "path": str(args.resume_from),
                     "sha256": file_sha256(args.resume_from),
                 }
-                agent = MixedActionPPO.load_checkpoint(args.resume_from)
+                agent = (
+                    MixedActionPPO.load_checkpoint(args.resume_from)
+                    if args.command == "train-ppo"
+                    else MixedActionTD3.load_checkpoint(args.resume_from)
+                )
                 if agent.number_of_uavs != args.uavs:
                     raise ValueError("Checkpoint UAV count does not match GymBridge")
                 config = agent.config
-            else:
+            elif args.command == "train-ppo":
                 config = PPOConfig(
                     rollout_steps=args.rollout_steps,
                     minibatch_size=args.minibatch_size,
@@ -570,8 +728,30 @@ def main() -> None:
                 agent = MixedActionPPO(
                     args.uavs, config=config, seed=args.training_seed_start
                 )
+            else:
+                config = TD3Config(
+                    batch_size=args.batch_size,
+                    replay_capacity=args.replay_capacity,
+                    learning_starts=args.learning_starts,
+                    policy_delay=args.policy_delay,
+                    hidden_sizes=tuple(args.hidden_sizes),
+                    actor_learning_rate=args.actor_learning_rate,
+                    critic_learning_rate=args.critic_learning_rate,
+                    policy_noise=args.policy_noise,
+                    noise_clip=args.noise_clip,
+                    exploration_noise=args.exploration_noise,
+                    discrete_exploration=args.discrete_exploration,
+                    target_temperature=args.target_temperature,
+                    bootstrap_truncated=not args.no_bootstrap_truncated,
+                )
+                agent = MixedActionTD3(
+                    args.uavs, config=config, seed=args.training_seed_start
+                )
             starting_training_interactions = int(agent.training_steps)
-            episodes, updates = train_ppo(
+            training_function = (
+                train_ppo if args.command == "train-ppo" else train_td3
+            )
+            episodes, updates = training_function(
                 env,
                 agent,
                 interaction_budget=args.interaction_budget,
@@ -579,7 +759,7 @@ def main() -> None:
             )
             used_training_seeds_this_run = [episode["seed"] for episode in episodes]
             if agent.training_seed_start is None or agent.next_training_seed is None:
-                raise AssertionError("PPO training seed cursor was not recorded")
+                raise AssertionError("training seed cursor was not recorded")
             used_training_seeds = list(
                 range(agent.training_seed_start, agent.next_training_seed)
             )
@@ -633,7 +813,11 @@ def main() -> None:
             }
             _write_json(args.output, payload)
         else:
-            agent = MixedActionPPO.load_checkpoint(args.checkpoint)
+            agent = (
+                MixedActionPPO.load_checkpoint(args.checkpoint)
+                if args.algorithm == "ppo"
+                else MixedActionTD3.load_checkpoint(args.checkpoint)
+            )
             if agent.number_of_uavs != args.uavs:
                 raise ValueError("Checkpoint UAV count does not match GymBridge")
             policies = [

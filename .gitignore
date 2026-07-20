@@ -2,6 +2,7 @@
 target/
 *.class
 /edu/
+artifacts/
 
 # ----- 运行/训练生成（不推送） -----
 results/

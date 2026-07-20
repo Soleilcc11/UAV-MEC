@@ -45,7 +45,7 @@ starts the development/training configuration with two UAVs and two mobile
 devices:
 
 ```bash
-java -cp 'target/classes:target/lib/*:src/main/resources/lib/*' \
+java -cp 'target/classes:target/lib/*' \
   edu.boun.edgecloudsim.uav.GymBridgeMain \
   12347 \
   src/test/resources/config/simulation_settings.xml \
@@ -58,7 +58,7 @@ The held-out configuration changes workload intensity and deadline, UAV energy
 parameters, and edge capacity:
 
 ```bash
-java -cp 'target/classes:target/lib/*:src/main/resources/lib/*' \
+java -cp 'target/classes:target/lib/*' \
   edu.boun.edgecloudsim.uav.GymBridgeMain \
   12348 \
   src/test/resources/config/heldout/simulation_settings.xml \
@@ -148,6 +148,34 @@ episode and rollout-update boundary. A forced budget cutoff is recorded as a
 truncation and the short rollout is flushed, so choosing a cutoff inside either
 boundary intentionally defines a different (but fully recorded) training run.
 
+## Mixed-action TD3
+
+The TD3 candidate is an explicitly parameterized-action extension: a masked
+target-logit head is executed by legal argmax, a `tanh` head controls movement,
+twin critics consume target one-hot plus movement, and target-policy smoothing
+is limited to movement. Replay, target networks, optimizers, normalizer state,
+all RNG streams, counters, and the training-seed cursor are checkpointed.
+
+```bash
+.venv/bin/python -m uav_mec_gym.experiment train-td3 \
+  --port 12347 --uavs 2 \
+  --environment-config \
+    src/test/resources/config/simulation_settings.xml \
+    src/test/resources/config/edge_devices.xml \
+    src/test/resources/config/applications.xml \
+  --interaction-budget 4096 \
+  --training-seed-start 10001 \
+  --validation-seeds 201 202 203 204 205 206 207 208 209 210 \
+  --heldout-seeds 301 302 303 304 305 306 307 308 309 310 \
+  --learning-starts 512 --batch-size 128 --replay-capacity 10000 \
+  --checkpoint results/formal/td3.pt \
+  --output results/formal/td3_training.json
+```
+
+Evaluation uses the same `evaluate` command with `--algorithm td3`. See
+[`docs/experiments/formal-protocol.md`](docs/experiments/formal-protocol.md) for
+the exact mixed-action definition and statistical protocol.
+
 ## Paired validation and held-out evaluation
 
 Validation seeds (`201`–`205`) and held-out test seeds (`301`–`305`) are
@@ -201,3 +229,25 @@ plot or algorithm claim, audit:
 
 Smoke runs prove the pipeline and reproducibility contract only. They are not
 paper evidence of algorithm superiority.
+
+## Formal 10-seed evidence and release artifacts
+
+The tracked formal config declares 10 independent training seeds per learned
+algorithm, a fixed 4,096-interaction budget per seed, and 10 paired seeds for
+each validation split. The runner is resumable and refuses a dirty tracked tree.
+
+```bash
+.venv/bin/python scripts/run_formal_experiments.py
+.venv/bin/python scripts/summarize_formal_experiments.py
+.venv/bin/python scripts/plot_formal_results.py
+```
+
+The summary script audits all raw transitions, checkpoint/config/Git hashes,
+paired seeds, and deterministic baseline repetition before producing tables.
+The plotting script emits PDF, SVG, and 300-DPI PNG figures with bootstrap
+intervals across independent training-seed means.
+
+Generated evidence stays ignored under `results/`; Maven output stays ignored
+under `target/`. Use `scripts/package_experiment_artifacts.py` for deterministic
+checksummed release bundles, following
+[`docs/experiments/artifact-publication.md`](docs/experiments/artifact-publication.md).

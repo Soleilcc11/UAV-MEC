@@ -77,7 +77,10 @@ workloads.
 
 The runner refuses a dirty tracked tree, performs a clean Maven package, starts
 the exact protocol 1.1 services, and resumes by validating existing report and
-checkpoint hashes.
+checkpoint hashes. Every training report, validation report, and held-out
+report runs in a fresh JVM. This isolates EdgeCloudSim process-level static
+state and makes repeated deterministic baselines comparable across learned
+checkpoints.
 
 ```bash
 .venv/bin/python scripts/run_formal_experiments.py
@@ -104,6 +107,7 @@ The summary refuses to complete unless:
 - all evaluation audits pass on the declared paired seeds;
 - Git and environment hashes are constant within the matrix;
 - repeated deterministic baseline metrics are identical across reports;
+- orchestration records the fresh-JVM-per-report lifecycle;
 - each algorithm has exactly 10 independent training replicates.
 
 Smoke results remain under `results/phase4/` and are not merged into the formal

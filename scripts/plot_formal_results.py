@@ -18,7 +18,7 @@ import numpy as np
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 DEFAULT_SUMMARY = (
-    REPOSITORY / "results/formal/protocol_1_1_10seed/summary/formal_summary.json"
+    REPOSITORY / "results/formal/protocol_1_1_10seed_v2/summary/formal_summary.json"
 )
 ALGORITHM_LABELS = {
     "mixed_action_ppo": "Mixed-action PPO",

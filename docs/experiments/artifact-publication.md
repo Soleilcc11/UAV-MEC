@@ -47,6 +47,9 @@ machine paths; they are intentionally excluded from publication bundles.
 ## Publication sequence
 
 1. Confirm the formal orchestration and aggregate audit both say `passed`.
+   The orchestration must record
+   `fresh_jvm_per_training_or_evaluation_report`; shared-JVM pilot data is not
+   release-eligible.
 2. Render the PNG figures and visually inspect labels, units, confidence
    intervals, and clipping; keep PDF/SVG as the paper source.
 3. Build the evidence and checkpoint bundles twice and confirm identical

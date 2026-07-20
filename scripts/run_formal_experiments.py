@@ -394,6 +394,7 @@ def main() -> None:
         "config": str(config_path.relative_to(REPOSITORY)),
         "config_sha256": _sha256(config_path),
         "git_commit_sha": _git_head(),
+        "service_lifecycle": "fresh_jvm_per_training_or_evaluation_report",
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "selected_runs": [
             {"algorithm": run.algorithm_name, "seed": run.training_seed_start}
@@ -426,32 +427,38 @@ def main() -> None:
         return
 
     try:
-        with _gym_bridge(
-            port=int(config["ports"]["training_validation"]),
-            config_paths=config["environments"]["training_validation"],
-            number_of_uavs=int(config["number_of_uavs"]),
-            log_path=output_root / "logs/gymbridge-training-validation.log",
-        ):
-            for run in runs:
-                paths = _paths(output_root, run)
-                paths["directory"].mkdir(parents=True, exist_ok=True)
-                if not _training_is_complete(
-                    paths["training"],
-                    paths["checkpoint"],
-                    algorithm=run.algorithm_name,
-                    interaction_budget=int(config["interaction_budget"]),
+        for run in runs:
+            paths = _paths(output_root, run)
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            if not _training_is_complete(
+                paths["training"],
+                paths["checkpoint"],
+                algorithm=run.algorithm_name,
+                interaction_budget=int(config["interaction_budget"]),
+            ):
+                with _gym_bridge(
+                    port=int(config["ports"]["training_validation"]),
+                    config_paths=config["environments"]["training_validation"],
+                    number_of_uavs=int(config["number_of_uavs"]),
+                    log_path=paths["directory"] / "gymbridge-training.log",
                 ):
                     _run_logged(
                         _training_command(python, config, run, paths),
                         paths["log"],
                         dry_run=False,
                     )
-                seeds = config["evaluation_seeds"]["validation"]
-                if not _evaluation_is_complete(
-                    paths["validation"],
-                    paths["checkpoint"],
-                    split="validation",
-                    seeds=seeds,
+            seeds = config["evaluation_seeds"]["validation"]
+            if not _evaluation_is_complete(
+                paths["validation"],
+                paths["checkpoint"],
+                split="validation",
+                seeds=seeds,
+            ):
+                with _gym_bridge(
+                    port=int(config["ports"]["training_validation"]),
+                    config_paths=config["environments"]["training_validation"],
+                    number_of_uavs=int(config["number_of_uavs"]),
+                    log_path=paths["directory"] / "gymbridge-validation.log",
                 ):
                     _run_logged(
                         _evaluation_command(
@@ -461,20 +468,20 @@ def main() -> None:
                         dry_run=False,
                     )
 
-        with _gym_bridge(
-            port=int(config["ports"]["heldout"]),
-            config_paths=config["environments"]["heldout"],
-            number_of_uavs=int(config["number_of_uavs"]),
-            log_path=output_root / "logs/gymbridge-heldout.log",
-        ):
-            for run in runs:
-                paths = _paths(output_root, run)
-                seeds = config["evaluation_seeds"]["heldout"]
-                if not _evaluation_is_complete(
-                    paths["heldout"],
-                    paths["checkpoint"],
-                    split="heldout",
-                    seeds=seeds,
+        for run in runs:
+            paths = _paths(output_root, run)
+            seeds = config["evaluation_seeds"]["heldout"]
+            if not _evaluation_is_complete(
+                paths["heldout"],
+                paths["checkpoint"],
+                split="heldout",
+                seeds=seeds,
+            ):
+                with _gym_bridge(
+                    port=int(config["ports"]["heldout"]),
+                    config_paths=config["environments"]["heldout"],
+                    number_of_uavs=int(config["number_of_uavs"]),
+                    log_path=paths["directory"] / "gymbridge-heldout.log",
                 ):
                     _run_logged(
                         _evaluation_command(python, config, run, paths, "heldout"),

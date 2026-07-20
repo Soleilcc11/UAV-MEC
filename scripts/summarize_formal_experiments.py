@@ -236,6 +236,18 @@ def _summarize_training_curves(
 def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
     config = read_json(config_path)
     output_root = REPOSITORY / config["output_root"]
+    orchestration = read_json(output_root / "orchestration.json")
+    if orchestration.get("status") != "complete":
+        raise ValueError("Formal orchestration is not complete")
+    if orchestration.get("experiment_id") != config["experiment_id"]:
+        raise ValueError("Orchestration experiment ID does not match config")
+    if orchestration.get("config_sha256") != file_sha256(config_path):
+        raise ValueError("Orchestration config hash does not match config")
+    required_lifecycle = "fresh_jvm_per_training_or_evaluation_report"
+    if orchestration.get("service_lifecycle") != required_lifecycle:
+        raise ValueError(
+            "Formal orchestration did not isolate each report in a fresh JVM"
+        )
     budget = int(config["interaction_budget"])
     bin_size = int(config["training_curve_bin_size"])
     training_curves: dict[str, list[list[dict[str, Any]]]] = defaultdict(list)
@@ -297,6 +309,8 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
 
     if len(git_commits) != 1:
         raise ValueError(f"Formal matrix spans multiple Git commits: {sorted(git_commits)}")
+    if next(iter(git_commits)) != orchestration.get("git_commit_sha"):
+        raise ValueError("Report Git commit does not match orchestration")
     if any(len(hashes) != 1 for hashes in environment_hashes.values()):
         raise ValueError("Formal matrix spans multiple environment hashes per split")
 
@@ -382,6 +396,7 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
                 "ten independent training seed starts per algorithm",
                 f"fixed {budget}-interaction budget per training seed",
                 "ten paired validation and held-out environment seeds",
+                "fresh JVM for every training and evaluation report",
                 "all raw evaluation audits passed",
                 "one Git commit and one environment hash per split",
                 "checkpoint SHA-256 matches training and evaluation reports",

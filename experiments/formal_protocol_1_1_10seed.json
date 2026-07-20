@@ -1,11 +1,11 @@
 {
   "format_version": 1,
-  "experiment_id": "formal_protocol_1_1_10seed",
+  "experiment_id": "formal_protocol_1_1_10seed_v2",
   "protocol_version": "1.1",
   "number_of_uavs": 2,
   "interaction_budget": 4096,
   "training_curve_bin_size": 256,
-  "output_root": "results/formal/protocol_1_1_10seed",
+  "output_root": "results/formal/protocol_1_1_10seed_v2",
   "ports": {
     "training_validation": 12470,
     "heldout": 12471

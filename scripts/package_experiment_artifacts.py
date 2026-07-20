@@ -15,7 +15,7 @@ from typing import Any, Iterable, Mapping
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-DEFAULT_ROOT = REPOSITORY / "results/formal/protocol_1_1_10seed"
+DEFAULT_ROOT = REPOSITORY / "results/formal/protocol_1_1_10seed_v2"
 SOURCE_PATTERNS = (
     "README.md",
     "pom.xml",
@@ -99,6 +99,10 @@ def _validate_experiment(experiment_root: Path) -> tuple[dict[str, Any], dict[st
     orchestration = _read_json(experiment_root / "orchestration.json")
     if orchestration.get("status") != "complete":
         raise ValueError("Formal orchestration is not complete")
+    if orchestration.get("service_lifecycle") != (
+        "fresh_jvm_per_training_or_evaluation_report"
+    ):
+        raise ValueError("Formal orchestration did not isolate reports in fresh JVMs")
     summary = _read_json(experiment_root / "summary/formal_summary.json")
     if summary.get("audit", {}).get("status") != "passed":
         raise ValueError("Formal summary audit did not pass")

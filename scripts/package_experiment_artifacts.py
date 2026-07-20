@@ -15,7 +15,11 @@ from typing import Any, Iterable, Mapping
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-DEFAULT_ROOT = REPOSITORY / "results/formal/protocol_1_1_10seed_v2"
+FORMAL_CONFIG = REPOSITORY / "experiments/formal_protocol_1_1_10seed.json"
+DEFAULT_ROOT = (
+    REPOSITORY
+    / json.loads(FORMAL_CONFIG.read_text(encoding="utf-8"))["output_root"]
+)
 SOURCE_PATTERNS = (
     "README.md",
     "pom.xml",

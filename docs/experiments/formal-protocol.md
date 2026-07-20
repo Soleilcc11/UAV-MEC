@@ -76,11 +76,18 @@ workloads.
 ## Run and resume
 
 The runner refuses a dirty tracked tree, performs a clean Maven package, starts
-the exact protocol 1.1 services, and resumes by validating existing report and
-checkpoint hashes. Every training report, validation report, and held-out
-report runs in a fresh JVM. This isolates EdgeCloudSim process-level static
-state and makes repeated deterministic baselines comparable across learned
-checkpoints.
+the exact protocol 1.1 services, and resumes only when the report matches the
+formal config hash, Git commit, environment hash, source-tree hash, training
+seed, interaction budget, and checkpoint hash. Every training report,
+validation report, and held-out report runs in a fresh JVM. This isolates
+EdgeCloudSim process-level static state and makes repeated deterministic
+baselines comparable across learned checkpoints. Dry runs only print commands
+and never create or replace the orchestration manifest.
+
+At natural termination, GymBridge freezes the terminal observation, reward,
+physical metrics, and episode counters atomically on the CloudSim event thread,
+then stops the simulator after the current timestamp batch. Terminal UAV energy
+therefore cannot depend on when the socket thread reads the response.
 
 ```bash
 .venv/bin/python scripts/run_formal_experiments.py

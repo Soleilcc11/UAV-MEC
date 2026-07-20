@@ -47,6 +47,41 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _canonical_hash(value: Any) -> str:
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _environment_sha256(config_paths: Sequence[str]) -> str:
+    entries = [
+        {"name": Path(path).name, "sha256": _sha256(REPOSITORY / path)}
+        for path in config_paths
+    ]
+    entries.sort(key=lambda entry: entry["name"])
+    return _canonical_hash(entries)
+
+
+def _repository_source_sha256() -> str:
+    files: list[Path] = []
+    pom = REPOSITORY / "pom.xml"
+    if pom.is_file():
+        files.append(pom)
+    for relative_root in (Path("src/main/java"), Path("src/main/resources")):
+        directory = REPOSITORY / relative_root
+        if directory.is_dir():
+            files.extend(path for path in directory.rglob("*") if path.is_file())
+    digest = hashlib.sha256()
+    for path in sorted(files, key=lambda item: item.relative_to(REPOSITORY).as_posix()):
+        digest.update(path.relative_to(REPOSITORY).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _git_head() -> str:
     return subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -213,20 +248,45 @@ def _training_is_complete(
     *,
     algorithm: str,
     interaction_budget: int,
+    training_seed_start: int,
+    experiment_id: str,
+    config_sha256: str,
+    git_commit_sha: str,
+    environment_sha256: str,
+    source_tree_sha256: str,
 ) -> bool:
     if not report_path.is_file() or not checkpoint_path.is_file():
         return False
     try:
         report = _read_json(report_path)
+        service_runtime = report.get("service_provenance", {}).get("runtime", {})
+        formal_experiment = report.get("formal_experiment", {})
         return (
             report.get("algorithm") == algorithm
             and int(report.get("interaction_budget", -1)) == interaction_budget
             and int(report.get("starting_training_interactions", -1)) == 0
             and int(report.get("interactions_this_run", -1)) == interaction_budget
+            and report.get("seed_partitions", {}).get("training_seeds_used", [None])[0]
+            == training_seed_start
+            and formal_experiment.get("experiment_id") == experiment_id
+            and formal_experiment.get("config_sha256") == config_sha256
+            and report.get("git_commit_sha") == git_commit_sha
+            and report.get("environment", {}).get("sha256") == environment_sha256
+            and service_runtime.get("git_commit_sha") == git_commit_sha
+            and service_runtime.get("source_tree_sha256") == source_tree_sha256
+            and service_runtime.get("classes_current") is True
             and report.get("checkpoint", {}).get("sha256")
             == _sha256(checkpoint_path)
         )
-    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+    except (
+        AttributeError,
+        IndexError,
+        KeyError,
+        TypeError,
+        ValueError,
+        OSError,
+        json.JSONDecodeError,
+    ):
         return False
 
 
@@ -234,21 +294,46 @@ def _evaluation_is_complete(
     report_path: Path,
     checkpoint_path: Path,
     *,
+    algorithm: str,
     split: str,
     seeds: Sequence[int],
+    interaction_budget: int,
+    experiment_id: str,
+    config_sha256: str,
+    git_commit_sha: str,
+    environment_sha256: str,
+    source_tree_sha256: str,
 ) -> bool:
     if not report_path.is_file() or not checkpoint_path.is_file():
         return False
     try:
         report = _read_json(report_path)
+        service_runtime = report.get("service_provenance", {}).get("runtime", {})
+        formal_experiment = report.get("formal_experiment", {})
         return (
             report.get("split") == split
             and report.get("paired_seeds") == list(seeds)
             and report.get("audit", {}).get("status") == "passed"
+            and int(report.get("training_interactions", {}).get(algorithm, -1))
+            == interaction_budget
+            and formal_experiment.get("experiment_id") == experiment_id
+            and formal_experiment.get("config_sha256") == config_sha256
+            and report.get("git_commit_sha") == git_commit_sha
+            and report.get("environment", {}).get("sha256") == environment_sha256
+            and service_runtime.get("git_commit_sha") == git_commit_sha
+            and service_runtime.get("source_tree_sha256") == source_tree_sha256
+            and service_runtime.get("classes_current") is True
             and report.get("checkpoint", {}).get("sha256")
             == _sha256(checkpoint_path)
         )
-    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+    except (
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        OSError,
+        json.JSONDecodeError,
+    ):
         return False
 
 
@@ -298,6 +383,7 @@ def _paths(output_root: Path, run: Run) -> dict[str, Path]:
 def _training_command(
     python: Path,
     config: Mapping[str, Any],
+    config_sha256: str,
     run: Run,
     paths: Mapping[str, Path],
 ) -> list[str]:
@@ -325,6 +411,10 @@ def _training_command(
         str(paths["checkpoint"]),
         "--output",
         str(paths["training"]),
+        "--formal-experiment-id",
+        str(config["experiment_id"]),
+        "--formal-config-sha256",
+        config_sha256,
         *_cli_arguments(run.arguments),
     ]
 
@@ -332,6 +422,7 @@ def _training_command(
 def _evaluation_command(
     python: Path,
     config: Mapping[str, Any],
+    config_sha256: str,
     run: Run,
     paths: Mapping[str, Path],
     split: str,
@@ -358,6 +449,10 @@ def _evaluation_command(
         str(paths["checkpoint"]),
         "--output",
         str(paths[split]),
+        "--formal-experiment-id",
+        str(config["experiment_id"]),
+        "--formal-config-sha256",
+        config_sha256,
     ]
 
 
@@ -375,11 +470,11 @@ def main() -> None:
     config = _read_json(config_path)
     _validate_config(config)
     _require_clean_tracked_tree()
+    config_sha256 = _sha256(config_path)
     python = REPOSITORY / ".venv/bin/python"
     if not python.is_file():
         raise FileNotFoundError(python)
     output_root = REPOSITORY / config["output_root"]
-    output_root.mkdir(parents=True, exist_ok=True)
     runs = _matrix(config, args.only)
     runs = [run for run in runs if run.index >= args.from_index]
     if args.max_runs is not None:
@@ -387,20 +482,53 @@ def main() -> None:
     if not runs:
         raise ValueError("No formal experiment runs selected")
 
+    if args.dry_run:
+        if not args.skip_build:
+            _run_logged(
+                ["mvn", "clean", "package", "-q", "-DskipTests"],
+                output_root / "logs/build.log",
+                dry_run=True,
+            )
+        for run in runs:
+            paths = _paths(output_root, run)
+            _run_logged(
+                _training_command(python, config, config_sha256, run, paths),
+                paths["log"],
+                dry_run=True,
+            )
+            for split in ("validation", "heldout"):
+                _run_logged(
+                    _evaluation_command(
+                        python, config, config_sha256, run, paths, split
+                    ),
+                    paths["log"],
+                    dry_run=True,
+                )
+        return
+
+    output_root.mkdir(parents=True, exist_ok=True)
+    git_commit_sha = _git_head()
+    source_tree_sha256 = _repository_source_sha256()
+    environment_sha256 = {
+        name: _environment_sha256(paths)
+        for name, paths in config["environments"].items()
+    }
     manifest_path = output_root / "orchestration.json"
     manifest = {
         "format_version": 1,
         "experiment_id": config["experiment_id"],
         "config": str(config_path.relative_to(REPOSITORY)),
-        "config_sha256": _sha256(config_path),
-        "git_commit_sha": _git_head(),
+        "config_sha256": config_sha256,
+        "git_commit_sha": git_commit_sha,
+        "source_tree_sha256": source_tree_sha256,
+        "environment_sha256": environment_sha256,
         "service_lifecycle": "fresh_jvm_per_training_or_evaluation_report",
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "selected_runs": [
             {"algorithm": run.algorithm_name, "seed": run.training_seed_start}
             for run in runs
         ],
-        "status": "dry_run" if args.dry_run else "running",
+        "status": "running",
     }
     _write_json_atomic(manifest_path, manifest)
 
@@ -408,23 +536,8 @@ def main() -> None:
         _run_logged(
             ["mvn", "clean", "package", "-q", "-DskipTests"],
             output_root / "logs/build.log",
-            dry_run=args.dry_run,
+            dry_run=False,
         )
-    if args.dry_run:
-        for run in runs:
-            paths = _paths(output_root, run)
-            _run_logged(
-                _training_command(python, config, run, paths),
-                paths["log"],
-                dry_run=True,
-            )
-            for split in ("validation", "heldout"):
-                _run_logged(
-                    _evaluation_command(python, config, run, paths, split),
-                    paths["log"],
-                    dry_run=True,
-                )
-        return
 
     try:
         for run in runs:
@@ -435,6 +548,12 @@ def main() -> None:
                 paths["checkpoint"],
                 algorithm=run.algorithm_name,
                 interaction_budget=int(config["interaction_budget"]),
+                training_seed_start=run.training_seed_start,
+                experiment_id=str(config["experiment_id"]),
+                config_sha256=config_sha256,
+                git_commit_sha=git_commit_sha,
+                environment_sha256=environment_sha256["training_validation"],
+                source_tree_sha256=source_tree_sha256,
             ):
                 with _gym_bridge(
                     port=int(config["ports"]["training_validation"]),
@@ -443,7 +562,9 @@ def main() -> None:
                     log_path=paths["directory"] / "gymbridge-training.log",
                 ):
                     _run_logged(
-                        _training_command(python, config, run, paths),
+                        _training_command(
+                            python, config, config_sha256, run, paths
+                        ),
                         paths["log"],
                         dry_run=False,
                     )
@@ -451,8 +572,15 @@ def main() -> None:
             if not _evaluation_is_complete(
                 paths["validation"],
                 paths["checkpoint"],
+                algorithm=run.algorithm_name,
                 split="validation",
                 seeds=seeds,
+                interaction_budget=int(config["interaction_budget"]),
+                experiment_id=str(config["experiment_id"]),
+                config_sha256=config_sha256,
+                git_commit_sha=git_commit_sha,
+                environment_sha256=environment_sha256["training_validation"],
+                source_tree_sha256=source_tree_sha256,
             ):
                 with _gym_bridge(
                     port=int(config["ports"]["training_validation"]),
@@ -462,7 +590,7 @@ def main() -> None:
                 ):
                     _run_logged(
                         _evaluation_command(
-                            python, config, run, paths, "validation"
+                            python, config, config_sha256, run, paths, "validation"
                         ),
                         paths["log"],
                         dry_run=False,
@@ -474,8 +602,15 @@ def main() -> None:
             if not _evaluation_is_complete(
                 paths["heldout"],
                 paths["checkpoint"],
+                algorithm=run.algorithm_name,
                 split="heldout",
                 seeds=seeds,
+                interaction_budget=int(config["interaction_budget"]),
+                experiment_id=str(config["experiment_id"]),
+                config_sha256=config_sha256,
+                git_commit_sha=git_commit_sha,
+                environment_sha256=environment_sha256["heldout"],
+                source_tree_sha256=source_tree_sha256,
             ):
                 with _gym_bridge(
                     port=int(config["ports"]["heldout"]),
@@ -484,7 +619,9 @@ def main() -> None:
                     log_path=paths["directory"] / "gymbridge-heldout.log",
                 ):
                     _run_logged(
-                        _evaluation_command(python, config, run, paths, "heldout"),
+                        _evaluation_command(
+                            python, config, config_sha256, run, paths, "heldout"
+                        ),
                         paths["log"],
                         dry_run=False,
                     )

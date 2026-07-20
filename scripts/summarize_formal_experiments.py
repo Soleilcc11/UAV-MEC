@@ -112,6 +112,8 @@ def _validate_training_report(
     seed: int,
     budget: int,
     checkpoint: Path,
+    experiment_id: str,
+    config_sha256: str,
 ) -> None:
     if report.get("algorithm") != algorithm:
         raise ValueError(f"Training algorithm mismatch for {algorithm}/{seed}")
@@ -121,6 +123,11 @@ def _validate_training_report(
         raise ValueError(f"Formal run unexpectedly resumed: {algorithm}/{seed}")
     if int(report.get("interactions_this_run", -1)) != budget:
         raise ValueError(f"Training interaction count mismatch for {algorithm}/{seed}")
+    if report.get("formal_experiment") != {
+        "experiment_id": experiment_id,
+        "config_sha256": config_sha256,
+    }:
+        raise ValueError(f"Training formal config mismatch for {algorithm}/{seed}")
     if report["seed_partitions"]["training_seeds_used"][0] != seed:
         raise ValueError(f"Training seed start mismatch for {algorithm}/{seed}")
     transitions = [
@@ -165,11 +172,20 @@ def _evaluation_rows(
     training_seed: int,
     split: str,
     expected_seeds: Sequence[int],
+    experiment_id: str,
+    config_sha256: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if report.get("audit", {}).get("status") != "passed":
         raise ValueError(f"Evaluation audit failed: {algorithm}/{training_seed}/{split}")
     if report.get("paired_seeds") != list(expected_seeds):
         raise ValueError(f"Paired seeds mismatch: {algorithm}/{training_seed}/{split}")
+    if report.get("formal_experiment") != {
+        "experiment_id": experiment_id,
+        "config_sha256": config_sha256,
+    }:
+        raise ValueError(
+            f"Evaluation formal config mismatch: {algorithm}/{training_seed}/{split}"
+        )
     candidates: list[dict[str, Any]] = []
     baselines: list[dict[str, Any]] = []
     for raw in report["episodes"]:
@@ -235,13 +251,14 @@ def _summarize_training_curves(
 
 def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
     config = read_json(config_path)
+    config_sha256 = file_sha256(config_path)
     output_root = REPOSITORY / config["output_root"]
     orchestration = read_json(output_root / "orchestration.json")
     if orchestration.get("status") != "complete":
         raise ValueError("Formal orchestration is not complete")
     if orchestration.get("experiment_id") != config["experiment_id"]:
         raise ValueError("Orchestration experiment ID does not match config")
-    if orchestration.get("config_sha256") != file_sha256(config_path):
+    if orchestration.get("config_sha256") != config_sha256:
         raise ValueError("Orchestration config hash does not match config")
     required_lifecycle = "fresh_jvm_per_training_or_evaluation_report"
     if orchestration.get("service_lifecycle") != required_lifecycle:
@@ -260,6 +277,7 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
     )
     git_commits: set[str] = set()
     environment_hashes: dict[str, set[str]] = defaultdict(set)
+    source_tree_hashes: set[str] = set()
     checkpoint_hashes: dict[str, dict[int, str]] = defaultdict(dict)
 
     for algorithm, algorithm_config in config["algorithms"].items():
@@ -274,8 +292,13 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
                 seed=seed,
                 budget=budget,
                 checkpoint=checkpoint,
+                experiment_id=str(config["experiment_id"]),
+                config_sha256=config_sha256,
             )
             git_commits.add(str(training["git_commit_sha"]))
+            source_tree_hashes.add(
+                str(training["service_provenance"]["runtime"]["source_tree_sha256"])
+            )
             environment_hashes["training_validation"].add(
                 str(training["environment"]["sha256"])
             )
@@ -289,6 +312,9 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
                 if report["checkpoint"]["sha256"] != checkpoint_hashes[algorithm][seed]:
                     raise ValueError(f"Evaluation checkpoint mismatch: {algorithm}/{seed}/{split}")
                 git_commits.add(str(report["git_commit_sha"]))
+                source_tree_hashes.add(
+                    str(report["service_provenance"]["runtime"]["source_tree_sha256"])
+                )
                 environment_name = "training_validation" if split == "validation" else "heldout"
                 environment_hashes[environment_name].add(str(report["environment"]["sha256"]))
                 candidates, baselines = _evaluation_rows(
@@ -297,6 +323,8 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
                     training_seed=seed,
                     split=split,
                     expected_seeds=config["evaluation_seeds"][split],
+                    experiment_id=str(config["experiment_id"]),
+                    config_sha256=config_sha256,
                 )
                 candidate_rows[algorithm][split].extend(candidates)
                 for row in baselines:
@@ -311,8 +339,17 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
         raise ValueError(f"Formal matrix spans multiple Git commits: {sorted(git_commits)}")
     if next(iter(git_commits)) != orchestration.get("git_commit_sha"):
         raise ValueError("Report Git commit does not match orchestration")
+    if len(source_tree_hashes) != 1:
+        raise ValueError("Formal matrix spans multiple source-tree hashes")
+    if next(iter(source_tree_hashes)) != orchestration.get("source_tree_sha256"):
+        raise ValueError("Report source-tree hash does not match orchestration")
     if any(len(hashes) != 1 for hashes in environment_hashes.values()):
         raise ValueError("Formal matrix spans multiple environment hashes per split")
+    reported_environment_hashes = {
+        name: next(iter(hashes)) for name, hashes in environment_hashes.items()
+    }
+    if reported_environment_hashes != orchestration.get("environment_sha256"):
+        raise ValueError("Report environment hashes do not match orchestration")
 
     summaries: dict[str, Any] = {"candidates": {}, "baselines": {}, "paired": {}}
     replicate_means: dict[str, Any] = defaultdict(lambda: defaultdict(dict))
@@ -377,14 +414,12 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "experiment_id": config["experiment_id"],
         "config_path": str(config_path.relative_to(REPOSITORY)),
-        "config_sha256": file_sha256(config_path),
+        "config_sha256": config_sha256,
         "git_commit_sha": next(iter(git_commits)),
         "interaction_budget_per_training_seed": budget,
         "independent_training_seeds_per_algorithm": 10,
         "paired_evaluation_seeds_per_split": 10,
-        "environment_hashes": {
-            name: next(iter(hashes)) for name, hashes in environment_hashes.items()
-        },
+        "environment_hashes": reported_environment_hashes,
         "checkpoint_hashes": checkpoint_hashes,
         "metrics": list(METRICS),
         "training_curves": _summarize_training_curves(training_curves),
@@ -398,7 +433,7 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
                 "ten paired validation and held-out environment seeds",
                 "fresh JVM for every training and evaluation report",
                 "all raw evaluation audits passed",
-                "one Git commit and one environment hash per split",
+                "formal config, Git, source-tree, and environment hashes match orchestration",
                 "checkpoint SHA-256 matches training and evaluation reports",
                 "repeated baselines are bitwise-deterministic on reported metrics",
                 "uncertainty is bootstrapped across independent training-seed means",

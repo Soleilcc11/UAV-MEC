@@ -593,6 +593,8 @@ def _add_shared_bridge_arguments(parser: argparse.ArgumentParser) -> None:
         help="Exact XML files used to launch this GymBridge server",
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--formal-experiment-id")
+    parser.add_argument("--formal-config-sha256")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -687,6 +689,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _build_parser().parse_args()
+    if (args.formal_experiment_id is None) != (
+        args.formal_config_sha256 is None
+    ):
+        raise ValueError(
+            "formal experiment ID and config SHA-256 must be supplied together"
+        )
+    formal_experiment = None
+    if args.formal_experiment_id is not None:
+        if len(args.formal_config_sha256) != 64:
+            raise ValueError("formal config SHA-256 must contain 64 hex characters")
+        try:
+            int(args.formal_config_sha256, 16)
+        except ValueError as exc:
+            raise ValueError(
+                "formal config SHA-256 must contain 64 hex characters"
+            ) from exc
+        formal_experiment = {
+            "experiment_id": args.formal_experiment_id,
+            "config_sha256": args.formal_config_sha256,
+        }
     environment = environment_manifest(args.environment_config)
     repository = Path(__file__).resolve().parents[1]
     commit_sha = current_commit_sha(repository)
@@ -786,6 +808,7 @@ def main() -> None:
                 "algorithm": agent.name,
                 "algorithm_config": config_dict,
                 "algorithm_config_hash": canonical_hash(config_dict),
+                "formal_experiment": formal_experiment,
                 "environment": environment,
                 "service_provenance": backend.provenance,
                 "git_commit_sha": commit_sha,
@@ -835,6 +858,7 @@ def main() -> None:
                 checkpoint_path=args.checkpoint,
                 service_provenance=backend.provenance,
             )
+            report["formal_experiment"] = formal_experiment
             _write_json(args.output, report)
     finally:
         env.close()

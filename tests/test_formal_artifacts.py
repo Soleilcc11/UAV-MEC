@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
-from scripts.plot_formal_results import create_figures
-from scripts.run_formal_experiments import _validate_config
+from scripts.package_experiment_artifacts import DEFAULT_ROOT
+from scripts.plot_formal_results import DEFAULT_SUMMARY, create_figures
+from scripts import run_formal_experiments
+from scripts.run_formal_experiments import (
+    _evaluation_is_complete,
+    _sha256,
+    _training_is_complete,
+    _validate_config,
+)
 from scripts.summarize_formal_experiments import bootstrap_summary, metric_value
 
 
@@ -144,3 +152,157 @@ def test_formal_config_rejects_fewer_than_ten_training_seeds():
     }
     with pytest.raises(ValueError, match="ten unique training"):
         _validate_config(config)
+
+
+def test_publication_helpers_follow_the_configured_output_root():
+    config = json.loads(
+        run_formal_experiments.DEFAULT_CONFIG.read_text(encoding="utf-8")
+    )
+    expected = run_formal_experiments.REPOSITORY / config["output_root"]
+
+    assert DEFAULT_ROOT == expected
+    assert DEFAULT_SUMMARY == expected / "summary/formal_summary.json"
+
+
+def test_dry_run_preserves_completed_orchestration_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    repository = Path(run_formal_experiments.REPOSITORY)
+    output_root = tmp_path / "formal"
+    output_root.mkdir()
+    manifest = output_root / "orchestration.json"
+    original = b'{"status":"complete","sentinel":true}\n'
+    manifest.write_bytes(original)
+    config = {
+        "format_version": 1,
+        "experiment_id": "dry_run_regression",
+        "protocol_version": "1.1",
+        "number_of_uavs": 2,
+        "interaction_budget": 1024,
+        "output_root": str(output_root),
+        "ports": {"training_validation": 12470, "heldout": 12471},
+        "environments": {
+            "training_validation": [
+                str(repository / "src/test/resources/config/simulation_settings.xml"),
+                str(repository / "src/test/resources/config/edge_devices.xml"),
+                str(repository / "src/test/resources/config/applications.xml"),
+            ],
+            "heldout": [
+                str(repository / "src/test/resources/config/heldout/simulation_settings.xml"),
+                str(repository / "src/test/resources/config/heldout/edge_devices.xml"),
+                str(repository / "src/test/resources/config/heldout/applications.xml"),
+            ],
+        },
+        "evaluation_seeds": {
+            "validation": list(range(201, 211)),
+            "heldout": list(range(301, 311)),
+        },
+        "algorithms": {
+            "mixed_action_td3": {
+                "command": "train-td3",
+                "evaluation_algorithm": "td3",
+                "training_seed_starts": list(range(10001, 10011)),
+            }
+        },
+    }
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setattr(run_formal_experiments, "_require_clean_tracked_tree", lambda: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_formal_experiments.py",
+            "--config",
+            str(config_path),
+            "--dry-run",
+            "--skip-build",
+            "--max-runs",
+            "1",
+        ],
+    )
+
+    run_formal_experiments.main()
+
+    assert manifest.read_bytes() == original
+    assert list(output_root.iterdir()) == [manifest]
+
+
+def test_resume_requires_exact_training_and_evaluation_provenance(tmp_path: Path):
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    identity = {
+        "experiment_id": "formal-v3",
+        "config_sha256": "1" * 64,
+        "git_commit_sha": "2" * 40,
+        "environment_sha256": "3" * 64,
+        "source_tree_sha256": "4" * 64,
+    }
+    shared = {
+        "formal_experiment": {
+            "experiment_id": identity["experiment_id"],
+            "config_sha256": identity["config_sha256"],
+        },
+        "git_commit_sha": identity["git_commit_sha"],
+        "environment": {"sha256": identity["environment_sha256"]},
+        "service_provenance": {
+            "runtime": {
+                "git_commit_sha": identity["git_commit_sha"],
+                "source_tree_sha256": identity["source_tree_sha256"],
+                "classes_current": True,
+            }
+        },
+        "checkpoint": {"sha256": _sha256(checkpoint)},
+    }
+    training_path = tmp_path / "training.json"
+    training = {
+        **shared,
+        "algorithm": "mixed_action_td3",
+        "interaction_budget": 4096,
+        "starting_training_interactions": 0,
+        "interactions_this_run": 4096,
+        "seed_partitions": {"training_seeds_used": [110001]},
+    }
+    training_path.write_text(json.dumps(training), encoding="utf-8")
+    training_arguments = {
+        "algorithm": "mixed_action_td3",
+        "interaction_budget": 4096,
+        "training_seed_start": 110001,
+        **identity,
+    }
+    assert _training_is_complete(training_path, checkpoint, **training_arguments)
+    assert not _training_is_complete(
+        training_path,
+        checkpoint,
+        **{**training_arguments, "training_seed_start": 999999},
+    )
+    assert not _training_is_complete(
+        training_path,
+        checkpoint,
+        **{**training_arguments, "git_commit_sha": "5" * 40},
+    )
+
+    evaluation_path = tmp_path / "validation.json"
+    evaluation = {
+        **shared,
+        "split": "validation",
+        "paired_seeds": list(range(201, 211)),
+        "audit": {"status": "passed"},
+        "training_interactions": {"mixed_action_td3": 4096},
+    }
+    evaluation_path.write_text(json.dumps(evaluation), encoding="utf-8")
+    evaluation_arguments = {
+        "algorithm": "mixed_action_td3",
+        "split": "validation",
+        "seeds": list(range(201, 211)),
+        "interaction_budget": 4096,
+        **identity,
+    }
+    assert _evaluation_is_complete(
+        evaluation_path, checkpoint, **evaluation_arguments
+    )
+    assert not _evaluation_is_complete(
+        evaluation_path,
+        checkpoint,
+        **{**evaluation_arguments, "environment_sha256": "6" * 64},
+    )

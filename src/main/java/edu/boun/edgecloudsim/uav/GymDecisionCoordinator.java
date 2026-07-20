@@ -35,6 +35,7 @@ public class GymDecisionCoordinator {
     private boolean terminated;
     private boolean truncated;
     private boolean closed;
+    private StepResult frozenTerminalResult;
     private int totalTaskCount;
     private int settledTaskCount;
     private int successfulTaskCount;
@@ -170,6 +171,16 @@ public class GymDecisionCoordinator {
                 && totalTaskCount > 0 && settledTaskCount >= totalTaskCount) {
             terminated = true;
             stepResultReady = true;
+            // Freeze every terminal value while the CloudSim thread still owns
+            // the exact event boundary.  The socket thread must never race the
+            // subsequent one-second UAV ticks when it constructs the response.
+            frozenTerminalResult = createStepResult();
+            if (CloudSim.running()) {
+                // CloudSim 4.0 only observes this flag after completing the
+                // current timestamp batch, so same-time events retain their
+                // deterministic ordering while no later tick can add energy.
+                CloudSim.abruptallyTerminate();
+            }
         }
         notifyAll();
     }
@@ -196,6 +207,18 @@ public class GymDecisionCoordinator {
         if (closed) {
             throw new IllegalStateException("Gym session is closed");
         }
+        if (frozenTerminalResult != null) {
+            StepResult result = frozenTerminalResult;
+            frozenTerminalResult = null;
+            stepResultReady = false;
+            return result;
+        }
+        StepResult result = createStepResult();
+        stepResultReady = false;
+        return result;
+    }
+
+    private StepResult createStepResult() {
         double totalUavEnergy = totalUavEnergyConsumed();
         double intervalUavEnergy = Math.max(0.0,
                 totalUavEnergy - lastReportedUavEnergy);
@@ -227,7 +250,6 @@ public class GymDecisionCoordinator {
         StepResult result = new StepResult(
                 buildObservation(), snapshot.rewardComponents, snapshot.reward,
                 snapshot.settledCount, terminated, truncated, metrics);
-        stepResultReady = false;
         return result;
     }
 
@@ -250,6 +272,7 @@ public class GymDecisionCoordinator {
         terminated = false;
         truncated = true;
         stepResultReady = true;
+        frozenTerminalResult = createStepResult();
         notifyAll();
     }
 
@@ -259,6 +282,7 @@ public class GymDecisionCoordinator {
         decisionForSimulation = null;
         initialDecisionReady = false;
         stepResultReady = false;
+        frozenTerminalResult = null;
         notifyAll();
     }
 

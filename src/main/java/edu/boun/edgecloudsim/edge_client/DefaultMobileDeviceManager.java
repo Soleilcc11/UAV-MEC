@@ -83,7 +83,11 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 
 		SimLogger.getInstance().taskExecuted(task.getCloudletId());
 
-		if(task.getAssociatedDatacenterId() == SimSettings.CLOUD_DATACENTER_ID){
+		if(task.getAssociatedDatacenterId() == SimSettings.MOBILE_DATACENTER_ID){
+			SimLogger.getInstance().taskEnded(task.getCloudletId(), CloudSim.clock());
+			SimManager.getInstance().notifyGymTaskSettled(task);
+		}
+		else if(task.getAssociatedDatacenterId() == SimSettings.CLOUD_DATACENTER_ID){
 			//SimLogger.printLine(CloudSim.clock() + ": " + getName() + ": task #" + task.getCloudletId() + " received from cloud");
 			double WanDelay = networkModel.getDownloadDelay(SimSettings.CLOUD_DATACENTER_ID, task.getMobileDeviceId(), task);
 			if(WanDelay > 0)
@@ -295,11 +299,12 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 				failAndSettle(task);
 			}
 		}
+		else if(target.getType() == ExecutionTarget.Type.LOCAL) {
+			SimLogger.getInstance().taskStarted(task.getCloudletId(), CloudSim.clock());
+			submitTaskToVm(task, 0.0, SimSettings.MOBILE_DATACENTER_ID);
+		}
 		else {
-			SimLogger.printLine("Execution target is not connected to a Broker resource yet: " + target);
-			SimLogger.getInstance().rejectedDueToVMCapacity(
-					task.getCloudletId(), CloudSim.clock(), SimSettings.VM_TYPES.MOBILE_VM.ordinal());
-			failAndSettle(task);
+			throw new IllegalArgumentException("Unsupported execution target: " + target);
 		}
 		return task;
 	}
@@ -358,6 +363,8 @@ public class DefaultMobileDeviceManager extends MobileDeviceManager {
 		int vmType = 0;
 		if(datacenterId == SimSettings.CLOUD_DATACENTER_ID)
 			vmType = SimSettings.VM_TYPES.CLOUD_VM.ordinal();
+		else if(datacenterId == SimSettings.MOBILE_DATACENTER_ID)
+			vmType = SimSettings.VM_TYPES.MOBILE_VM.ordinal();
 		else
 			vmType = SimSettings.VM_TYPES.EDGE_VM.ordinal();
 		

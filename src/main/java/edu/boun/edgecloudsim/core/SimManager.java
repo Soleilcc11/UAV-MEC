@@ -154,6 +154,12 @@ public class SimManager extends SimEntity {
                 vmList.addAll(cloudServerManager.getVmList(hostId));
             }
         }
+        for (int mobileDeviceId = 0; mobileDeviceId < numOfMobileDevice;
+                mobileDeviceId++) {
+            if (mobileServerManager.getVmList(mobileDeviceId) != null) {
+                vmList.addAll(mobileServerManager.getVmList(mobileDeviceId));
+            }
+        }
         mobileDeviceManager.submitVmList(vmList);
         SimLogger.printLine("EdgeCloudSim资源已初始化: " + vmList.size() + " 个VM");
     }

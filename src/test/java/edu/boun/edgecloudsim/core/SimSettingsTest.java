@@ -27,4 +27,42 @@ class SimSettingsTest {
         assertEquals(20.0, settings.getUAVHoverPower());
         assertEquals(0.001, settings.getUAVComputeEnergyPerMi());
     }
+
+    @Test
+    void parsesUrbanAndRuralProbabilisticChannelProfiles() {
+        SimSettings settings = SimSettings.getInstance();
+        settings.initialize(
+                "src/main/resources/config/urban/simulation_settings.xml",
+                "src/main/resources/config/edge_devices.xml",
+                "src/main/resources/config/urban/applications.xml");
+        assertEquals("urban", settings.getUAVEnvironment());
+        assertEquals(9.61, settings.getUAVLoSA());
+        assertEquals(2, settings.getNumOfUAVs());
+        assertEquals(3600.0, settings.getSimulationTime());
+        assertEquals(4, settings.getUAVAccessChannelCount());
+        assertEquals(0.99, settings.getSmdpDiscountBase());
+        settings.initialize(
+                "src/main/resources/config/rural/simulation_settings.xml",
+                "src/main/resources/config/edge_devices.xml",
+                "src/main/resources/config/rural/applications.xml");
+        assertEquals("rural", settings.getUAVEnvironment());
+        assertEquals(4.88, settings.getUAVLoSA());
+        assertEquals(2, settings.getNumOfUAVs());
+        assertEquals(3600.0, settings.getSimulationTime());
+    }
+
+    @Test
+    void parsesBoundedPilotConfiguration() {
+        SimSettings settings = SimSettings.getInstance();
+        settings.initialize(
+                "src/main/resources/config/pilot/simulation_settings.xml",
+                "src/main/resources/config/edge_devices.xml",
+                "src/main/resources/config/pilot/applications.xml");
+
+        assertEquals(1, settings.getNumOfUAVs());
+        assertEquals(300.0, settings.getSimulationTime());
+        assertEquals(400.0, settings.getSimulationSpace()[0]);
+        assertEquals(400.0, settings.getSimulationSpace()[1]);
+        assertEquals(50.0, settings.getUAVInitialHeight());
+    }
 }

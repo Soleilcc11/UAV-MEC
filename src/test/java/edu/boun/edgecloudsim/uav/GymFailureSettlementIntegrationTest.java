@@ -37,7 +37,7 @@ class GymFailureSettlementIntegrationTest {
         Harness harness = start(factory);
         try {
             harness.coordinator.awaitInitialObservation(5_000);
-            int[] targets = {1, 2, 3}; // cloud, edge, UAV 0
+            int[] targets = {1, 2, 3}; // cloud, UAV 0, UAV 1
             GymDecisionCoordinator.StepResult result = null;
             for (int target : targets) {
                 harness.coordinator.beginDecision(target, zeroMovements(harness.manager));
@@ -60,7 +60,7 @@ class GymFailureSettlementIntegrationTest {
         Harness harness = start(factory);
         try {
             harness.coordinator.awaitInitialObservation(5_000);
-            int[] targets = {2, 2, 2}; // no edge VM, edge mobility, edge download
+            int[] targets = {2, 2, 2}; // upload rejection, UAV mobility, UAV download
             GymDecisionCoordinator.StepResult result = null;
             for (int index = 0; index < targets.length; index++) {
                 int target = targets[index];
@@ -88,7 +88,7 @@ class GymFailureSettlementIntegrationTest {
             // One processing tick consumes 20 J of hover energy and the final
             // 0.1 J permits only a partial execution before exhaustion.
             harness.manager.getUAVManager().getUAV(0).setEnergy(20.1);
-            harness.coordinator.beginDecision(3, zeroMovements(harness.manager));
+            harness.coordinator.beginDecision(2, zeroMovements(harness.manager));
             GymDecisionCoordinator.StepResult result =
                     harness.coordinator.awaitStepResult(5_000);
 
@@ -223,7 +223,7 @@ class GymFailureSettlementIntegrationTest {
                     @Override
                     public double getUploadDelay(int sourceDeviceId, int destDeviceId,
                             Task task) {
-                        return 0.01;
+                        return task.getCloudletId() == 1 ? 0.0 : 0.01;
                     }
 
                     @Override

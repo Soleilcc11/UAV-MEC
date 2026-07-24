@@ -29,6 +29,7 @@ env/
 *.log
 *.log.*
 .DS_Store
+/tmp/
 
 # ----- 可选：训练数据/大文件（若不想进库可取消注释） -----
 # results/*.json

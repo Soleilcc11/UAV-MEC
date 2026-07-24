@@ -16,15 +16,31 @@ import numpy as np
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = REPOSITORY / "experiments/formal_protocol_1_1_10seed.json"
+DEFAULT_CONFIG = REPOSITORY / "experiments/formal_protocol_1_2_10seed.json"
 METRICS = (
     "total_reward",
-    "success_rate",
+    "deadline_success_rate",
     "latency_per_settled_task_seconds",
+    "latency_p95_seconds",
     "energy_per_settled_task_joules",
+    "throughput_tasks_per_second",
     "constraint_violations",
+    "average_uav_queue_length",
+    "max_uav_queue_length",
+    "local_resource_utilization",
+    "cloud_resource_utilization",
+    "uav_resource_utilization",
+    "local_target_ratio",
+    "cloud_target_ratio",
+    "uav_target_ratio",
+    "offload_ratio",
 )
-BASELINES = ("random_masked", "minimum_estimated_delay")
+BASELINES = (
+    "random_masked",
+    "minimum_estimated_delay",
+    "local_only",
+    "cloud_only",
+)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -56,10 +72,12 @@ def metric_value(row: Mapping[str, Any], metric: str) -> float:
     physical = row["physical_metric_sums"]
     if metric == "total_reward":
         value = float(row["total_reward"])
-    elif metric == "success_rate":
-        value = float(row["successful_tasks"]) / denominator
+    elif metric == "deadline_success_rate":
+        value = float(row["deadline_success_rate"])
     elif metric == "latency_per_settled_task_seconds":
         value = float(physical["latency_seconds"]) / denominator
+    elif metric == "latency_p95_seconds":
+        value = float(row["latency_p95_seconds"])
     elif metric == "energy_per_settled_task_joules":
         value = (
             float(physical["ue_energy_joules"])
@@ -67,6 +85,26 @@ def metric_value(row: Mapping[str, Any], metric: str) -> float:
         ) / denominator
     elif metric == "constraint_violations":
         value = float(physical["constraint_violations"])
+    elif metric == "throughput_tasks_per_second":
+        value = float(row["successful_tasks"]) / float(row["simulation_time"])
+    elif metric == "average_uav_queue_length":
+        value = float(row["audit_metric_means"]["uav_queue_length_total"])
+    elif metric == "max_uav_queue_length":
+        value = float(row["audit_metric_maxima"]["uav_queue_length_max"])
+    elif metric == "local_resource_utilization":
+        value = float(row["audit_metric_means"]["local_resource_utilization"])
+    elif metric == "cloud_resource_utilization":
+        value = float(row["audit_metric_means"]["cloud_resource_utilization"])
+    elif metric == "uav_resource_utilization":
+        value = float(row["audit_metric_means"]["uav_resource_utilization"])
+    elif metric == "local_target_ratio":
+        value = float(row["target_ratios"]["local"])
+    elif metric == "cloud_target_ratio":
+        value = float(row["target_ratios"]["cloud"])
+    elif metric == "uav_target_ratio":
+        value = float(row["target_ratios"]["uav"])
+    elif metric == "offload_ratio":
+        value = float(row["target_ratios"]["offloaded"])
     else:
         raise KeyError(metric)
     if not np.isfinite(value):
@@ -218,6 +256,11 @@ def _baseline_signature(row: Mapping[str, Any]) -> dict[str, Any]:
         "successful_tasks": row["successful_tasks"],
         "reward_component_sums": row["reward_component_sums"],
         "physical_metric_sums": row["physical_metric_sums"],
+        "audit_metric_means": row["audit_metric_means"],
+        "audit_metric_maxima": row["audit_metric_maxima"],
+        "target_counts": row["target_counts"],
+        "target_ratios": row["target_ratios"],
+        "exponential_saturation_rate": row["exponential_saturation_rate"],
     }
 
 
@@ -410,13 +453,15 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
             }
 
     payload = {
-        "format_version": 1,
+        "format_version": 2,
+        "protocol_version": "1.2",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "experiment_id": config["experiment_id"],
         "config_path": str(config_path.relative_to(REPOSITORY)),
         "config_sha256": config_sha256,
         "git_commit_sha": next(iter(git_commits)),
         "interaction_budget_per_training_seed": budget,
+        "training_curve_bin_size": bin_size,
         "independent_training_seeds_per_algorithm": 10,
         "paired_evaluation_seeds_per_split": 10,
         "environment_hashes": reported_environment_hashes,
@@ -447,7 +492,16 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
 
 
 def _format_interval(summary: Mapping[str, Any], metric: str) -> str:
-    scale = 100.0 if metric == "success_rate" else 1.0
+    scale = 100.0 if metric in {
+        "deadline_success_rate",
+        "local_resource_utilization",
+        "cloud_resource_utilization",
+        "uav_resource_utilization",
+        "local_target_ratio",
+        "cloud_target_ratio",
+        "uav_target_ratio",
+        "offload_ratio",
+    } else 1.0
     return (
         f"{float(summary['mean']) * scale:.3f} "
         f"[{float(summary['bootstrap_95_ci_low']) * scale:.3f}, "
@@ -483,10 +537,21 @@ def _write_tables(payload: Mapping[str, Any], directory: Path) -> None:
 
     labels = {
         "total_reward": "Reward",
-        "success_rate": "Success (%)",
+        "deadline_success_rate": "Success (%)",
         "latency_per_settled_task_seconds": "Latency/task (s)",
+        "latency_p95_seconds": "P95 latency (s)",
         "energy_per_settled_task_joules": "Energy/task (J)",
+        "throughput_tasks_per_second": "Throughput (task/s)",
         "constraint_violations": "Violations",
+        "average_uav_queue_length": "Avg UAV queue",
+        "max_uav_queue_length": "Max UAV queue",
+        "local_resource_utilization": "Local util.",
+        "cloud_resource_utilization": "Cloud util.",
+        "uav_resource_utilization": "UAV util.",
+        "local_target_ratio": "Local ratio",
+        "cloud_target_ratio": "Cloud ratio",
+        "uav_target_ratio": "UAV ratio",
+        "offload_ratio": "Offload ratio",
     }
     policies = {
         **payload["summaries"]["baselines"],

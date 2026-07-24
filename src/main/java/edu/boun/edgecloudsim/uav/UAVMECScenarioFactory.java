@@ -11,8 +11,8 @@ import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.edge_client.DefaultMobileDeviceManager;
 import edu.boun.edgecloudsim.edge_client.MobileDeviceManager;
-import edu.boun.edgecloudsim.edge_client.mobile_processing_unit.DefaultMobileServerManager;
 import edu.boun.edgecloudsim.edge_client.mobile_processing_unit.MobileServerManager;
+import edu.boun.edgecloudsim.applications.sample_app3.SampleMobileServerManager;
 import edu.boun.edgecloudsim.edge_orchestrator.BasicEdgeOrchestrator;
 import edu.boun.edgecloudsim.edge_orchestrator.EdgeOrchestrator;
 import edu.boun.edgecloudsim.edge_server.DefaultEdgeServerManager;
@@ -97,7 +97,7 @@ public class UAVMECScenarioFactory implements ScenarioFactory {
 
     @Override
     public MobileServerManager getMobileServerManager() {
-        return new DefaultMobileServerManager();
+        return new SampleMobileServerManager(numOfMobileDevices);
     }
 
     @Override

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the resumable protocol-1.1 independent-training-seed experiment matrix."""
+"""Run the resumable protocol-1.2 independent-training-seed experiment matrix."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from typing import Any, Iterator, Mapping, Sequence
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = REPOSITORY / "experiments/formal_protocol_1_1_10seed.json"
+DEFAULT_CONFIG = REPOSITORY / "experiments/formal_protocol_1_2_10seed.json"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -94,7 +94,7 @@ def _git_head() -> str:
 
 def _require_clean_tracked_tree() -> None:
     status = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=no"],
+        ["git", "status", "--porcelain", "--untracked-files=all"],
         cwd=REPOSITORY,
         check=True,
         capture_output=True,
@@ -102,32 +102,69 @@ def _require_clean_tracked_tree() -> None:
     ).stdout.strip()
     if status:
         raise RuntimeError(
-            "Formal experiments require a clean tracked tree so report Git "
+            "Formal experiments require a clean tree so report Git "
             f"provenance is truthful:\n{status}"
         )
 
 
 def _validate_config(config: Mapping[str, Any]) -> None:
-    if int(config.get("format_version", 0)) != 1:
+    if int(config.get("format_version", 0)) != 2:
         raise ValueError("Unsupported formal experiment config version")
-    if str(config.get("protocol_version")) != "1.1":
-        raise ValueError("Formal experiments require GymBridge protocol 1.1")
+    if str(config.get("protocol_version")) != "1.2":
+        raise ValueError("Formal experiments require GymBridge protocol 1.2")
     budget = int(config.get("interaction_budget", 0))
     if budget < 1024:
         raise ValueError("Formal interaction_budget must be at least 1024")
+    if int(config.get("bootstrap_resamples", 0)) != 20_000:
+        raise ValueError("Formal protocol requires exactly 20,000 bootstrap resamples")
+    if config.get("primary_metric") != "deadline_success_rate":
+        raise ValueError("Formal primary metric must be deadline_success_rate")
     algorithms = config.get("algorithms")
     if not isinstance(algorithms, Mapping) or not algorithms:
         raise ValueError("Formal config must contain algorithms")
-    all_training_starts: list[int] = []
+    expected_training_starts: list[int] | None = None
     for name, algorithm in algorithms.items():
-        if algorithm.get("command") not in {"train-ppo", "train-td3"}:
+        if algorithm.get("command") not in {
+            "train-ddpg", "train-ppo", "train-dqn", "train-td3"
+        }:
             raise ValueError(f"Unsupported training command for {name}")
         starts = [int(value) for value in algorithm.get("training_seed_starts", [])]
         if len(starts) != 10 or len(set(starts)) != 10:
             raise ValueError(f"{name} must define ten unique training seed starts")
-        all_training_starts.extend(starts)
-    if len(set(all_training_starts)) != len(all_training_starts):
-        raise ValueError("Independent training seed starts overlap across algorithms")
+        if expected_training_starts is None:
+            expected_training_starts = starts
+        elif starts != expected_training_starts:
+            raise ValueError(
+                "All algorithms must use the same paired training seed starts"
+            )
+    if (
+        "masked_dqn_zero_movement" in algorithms
+        and algorithms["masked_dqn_zero_movement"].get("comparison_role")
+        != "action_capability_ablation"
+    ):
+        raise ValueError("DQN must be labeled as an action-capability ablation")
+    if any(
+        algorithms[name].get("comparison_role") != "main"
+        for name in (
+            set(algorithms)
+            & {
+                "masked_parameterized_action_ddpg",
+                "mixed_action_ppo",
+                "mixed_action_td3",
+            }
+        )
+        if "comparison_role" in algorithms[name]
+    ):
+        raise ValueError("DDPG, PPO, and TD3 must be labeled as main comparisons")
+    if "baselines" in config and config.get("baselines") != [
+            "random_masked",
+            "minimum_estimated_delay",
+            "local_only",
+            "cloud_only",
+    ]:
+        raise ValueError("Formal baseline set or ordering is not frozen")
+    if int(config.get("number_of_uavs", 0)) <= 0:
+        raise ValueError("Formal protocol requires a positive UAV count")
     evaluation = config.get("evaluation_seeds", {})
     validation = [int(value) for value in evaluation.get("validation", [])]
     heldout = [int(value) for value in evaluation.get("heldout", [])]
@@ -138,6 +175,7 @@ def _validate_config(config: Mapping[str, Any]) -> None:
     if set(validation) & set(heldout):
         raise ValueError("validation and heldout seed sets overlap")
     environments = config.get("environments", {})
+    mobile_devices = config.get("mobile_devices", {})
     for split in ("training_validation", "heldout"):
         paths = environments.get(split, [])
         if len(paths) != 3:
@@ -145,6 +183,8 @@ def _validate_config(config: Mapping[str, Any]) -> None:
         for relative in paths:
             if not (REPOSITORY / relative).is_file():
                 raise FileNotFoundError(REPOSITORY / relative)
+        if int(mobile_devices.get(split, 0)) <= 0:
+            raise ValueError(f"{split} must define a positive mobile device count")
 
 
 def _cli_arguments(arguments: Mapping[str, Any]) -> list[str]:
@@ -186,7 +226,7 @@ def _gym_bridge(
     *,
     port: int,
     config_paths: Sequence[str],
-    number_of_uavs: int,
+    number_of_mobile_devices: int,
     log_path: Path,
 ) -> Iterator[None]:
     if _port_is_open(port):
@@ -199,7 +239,7 @@ def _gym_bridge(
         "edu.boun.edgecloudsim.uav.GymBridgeMain",
         str(port),
         *(str(REPOSITORY / path) for path in config_paths),
-        str(number_of_uavs),
+        str(number_of_mobile_devices),
     ]
     with log_path.open("a", encoding="utf-8") as log:
         log.write(f"\n[{datetime.now(timezone.utc).isoformat()}] {' '.join(command)}\n")
@@ -459,7 +499,13 @@ def _evaluation_command(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--only", choices=["mixed_action_ppo", "mixed_action_td3"])
+    parser.add_argument(
+        "--only",
+        choices=[
+            "masked_parameterized_action_ddpg", "mixed_action_ppo",
+            "masked_dqn_zero_movement", "mixed_action_td3",
+        ],
+    )
     parser.add_argument("--from-index", type=int, default=0)
     parser.add_argument("--max-runs", type=int)
     parser.add_argument("--skip-build", action="store_true")
@@ -515,7 +561,8 @@ def main() -> None:
     }
     manifest_path = output_root / "orchestration.json"
     manifest = {
-        "format_version": 1,
+        "format_version": 2,
+        "protocol_version": "1.2",
         "experiment_id": config["experiment_id"],
         "config": str(config_path.relative_to(REPOSITORY)),
         "config_sha256": config_sha256,
@@ -558,7 +605,9 @@ def main() -> None:
                 with _gym_bridge(
                     port=int(config["ports"]["training_validation"]),
                     config_paths=config["environments"]["training_validation"],
-                    number_of_uavs=int(config["number_of_uavs"]),
+                    number_of_mobile_devices=int(
+                        config["mobile_devices"]["training_validation"]
+                    ),
                     log_path=paths["directory"] / "gymbridge-training.log",
                 ):
                     _run_logged(
@@ -585,7 +634,9 @@ def main() -> None:
                 with _gym_bridge(
                     port=int(config["ports"]["training_validation"]),
                     config_paths=config["environments"]["training_validation"],
-                    number_of_uavs=int(config["number_of_uavs"]),
+                    number_of_mobile_devices=int(
+                        config["mobile_devices"]["training_validation"]
+                    ),
                     log_path=paths["directory"] / "gymbridge-validation.log",
                 ):
                     _run_logged(
@@ -615,7 +666,9 @@ def main() -> None:
                 with _gym_bridge(
                     port=int(config["ports"]["heldout"]),
                     config_paths=config["environments"]["heldout"],
-                    number_of_uavs=int(config["number_of_uavs"]),
+                    number_of_mobile_devices=int(
+                        config["mobile_devices"]["heldout"]
+                    ),
                     log_path=paths["directory"] / "gymbridge-heldout.log",
                 ):
                     _run_logged(

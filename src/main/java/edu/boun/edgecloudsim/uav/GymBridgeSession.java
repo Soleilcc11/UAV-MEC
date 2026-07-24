@@ -11,7 +11,7 @@ import edu.boun.edgecloudsim.core.SimSettings;
 
 /** Owns one resettable EdgeCloudSim episode for the GymBridge protocol. */
 public class GymBridgeSession implements AutoCloseable {
-    public static final String PROTOCOL_VERSION = "1.1";
+    public static final String PROTOCOL_VERSION = "1.2";
     private final String settingsPath;
     private final String edgeDevicesPath;
     private final String applicationsPath;
@@ -86,16 +86,17 @@ public class GymBridgeSession implements AutoCloseable {
                 .put("decision_cadence", "task_arrival")
                 .put("number_of_uavs", uavCount)
                 .put("action", new JSONObject()
-                        .put("target_count", 3 + uavCount)
+                        .put("target_count", 2 + uavCount)
                         .put("movement_shape", new JSONArray().put(uavCount).put(3))
                         .put("movement_low", -1.0)
                         .put("movement_high", 1.0))
                 .put("observation", new JSONObject()
                         .put("time_shape", new JSONArray().put(1))
+                        .put("delta_time_shape", new JSONArray().put(1))
                         .put("task_shape", new JSONArray().put(7))
-                        .put("resources_shape", new JSONArray().put(3).put(3))
+                        .put("resources_shape", new JSONArray().put(2).put(3))
                         .put("uavs_shape", new JSONArray().put(uavCount).put(8))
-                        .put("action_mask_shape", new JSONArray().put(3 + uavCount)));
+                        .put("action_mask_shape", new JSONArray().put(2 + uavCount)));
     }
 
     @Override

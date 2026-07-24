@@ -15,13 +15,14 @@ from typing import Any, Iterable, Mapping
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-FORMAL_CONFIG = REPOSITORY / "experiments/formal_protocol_1_1_10seed.json"
+FORMAL_CONFIG = REPOSITORY / "experiments/formal_protocol_1_2_10seed.json"
 DEFAULT_ROOT = (
     REPOSITORY
     / json.loads(FORMAL_CONFIG.read_text(encoding="utf-8"))["output_root"]
 )
 SOURCE_PATTERNS = (
     "README.md",
+    "README.zh-CN.md",
     "pom.xml",
     "pyproject.toml",
     "requirements-dev.txt",
@@ -31,9 +32,11 @@ SOURCE_PATTERNS = (
     "docs/adr/*.md",
     "docs/experiments/*.md",
     "src/main/java/**/*.java",
-    "src/main/resources/config/*",
+    "src/main/resources/config/**/*",
     "src/main/resources/maven-repository/**/*",
+    "src/test/java/**/*.java",
     "src/test/resources/config/**/*",
+    "tests/*.py",
 )
 
 

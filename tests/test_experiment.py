@@ -30,7 +30,7 @@ class _ShortEpisodeEnv:
         return self._observation(), {"seed": self.seed}
 
     def step(self, action):
-        assert int(action["target"]) in (1, 2, 3, 4)
+        assert int(action["target"]) in (1, 2, 3)
         assert np.asarray(action["movement"]).shape == (2, 3)
         self.steps += 1
         terminated = self.steps >= 2
@@ -42,8 +42,23 @@ class _ShortEpisodeEnv:
             False,
             {
                 "settled_tasks": self.steps,
+                "settled_in_transition": 1,
                 "total_tasks": 2,
                 "simulation_time": float(self.steps),
+                "elapsed_simulation_time": 1.0,
+                "effective_discount": 0.99,
+                "selected_cloud_relay_uav": -1,
+                "throughput_tasks_per_second": success / float(self.steps),
+                "uav_queue_length_total": 0,
+                "uav_queue_length_max": 0,
+                "active_access_uploads": 0,
+                "active_access_downloads": 0,
+                "active_backhaul_uploads": 0,
+                "active_backhaul_downloads": 0,
+                "local_resource_utilization": 0.1,
+                "cloud_resource_utilization": 0.2,
+                "uav_resource_utilization": 0.3,
+                "settled_task_latencies_seconds": [1.0],
                 "reward_components": {
                     "success": success,
                     "latency_ratio": 0.25,
@@ -62,14 +77,15 @@ class _ShortEpisodeEnv:
     def _observation(self, terminal=False):
         return {
             "time": np.array([1.0 if terminal else self.steps / 2], dtype=np.float32),
+            "delta_time": np.array([0.5], dtype=np.float32),
             "task": np.zeros(7, dtype=np.float32)
             if terminal
             else np.full(7, 0.25, dtype=np.float32),
-            "resources": np.full((3, 3), 0.4, dtype=np.float32),
+            "resources": np.full((2, 3), 0.4, dtype=np.float32),
             "uavs": np.full((2, 8), 0.3, dtype=np.float32),
-            "action_mask": np.zeros(5, dtype=np.int8)
+            "action_mask": np.zeros(4, dtype=np.int8)
             if terminal
-            else np.array([0, 1, 1, 1, 1], dtype=np.int8),
+            else np.array([0, 1, 1, 1], dtype=np.int8),
         }
 
 

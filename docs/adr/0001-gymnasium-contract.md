@@ -1,80 +1,134 @@
-# ADR 0001: Gymnasium contract for UAV-MEC
+# ADR 0001: GymBridge 1.2 SMDP/POMDP contract
 
 - Status: Accepted
-- Date: 2026-07-17
+- Date: 2026-07-24
+- Supersedes: protocol 1.1 contract
 
-## Decision
+## Decision boundary
 
-The environment uses **task-arrival decision epochs**. One `step(action)` applies to exactly one current task. The backend applies the offloading target and all UAV movement commands, then advances EdgeCloudSim until the next task-arrival decision point or episode termination. Previously submitted tasks remain in flight, so execution and resource contention are not serialized by the Gym interface.
+Java/EdgeCloudSim owns the complete simulator state, event queue, workload,
+mobility, resources, network, and terminal settlement. Python may only call
+`hello`, `reset`, `step`, and `close`.
 
-This avoids a variable-length list of offloading decisions and preserves a fixed Gymnasium action space.
+A decision epoch occurs at each task arrival. Applying one action does not wait
+for that task alone to complete: previously submitted tasks remain in flight and
+all EdgeCloudSim events run until the next task arrival or episode end. The
+underlying process is an SMDP; because the agent receives a compressed view of
+the full simulator state, the learning interface is also partially observable.
+
+For elapsed simulation time `delta_t_k`, discount base `gamma_0`, and time unit
+`tau`, the backend supplies:
+
+```text
+gamma_k = gamma_0 ** (delta_t_k / tau)
+```
+
+Algorithms must store this transition-specific value. A fixed per-step gamma is
+not protocol compliant.
 
 ## Action
 
-`action_space` is a `Dict`:
+```text
+Dict(
+  target   = Discrete(2 + U),
+  movement = Box(-1, 1, shape=(U, 3), dtype=float32)
+)
+```
 
-- `target: Discrete(3 + number_of_uavs)`
-  - `0`: local mobile execution
-  - `1`: cloud
-  - `2`: edge
-  - `3 + i`: UAV `i`
-- `movement: Box(-1, 1, shape=(number_of_uavs, 3))`
-  - normalized XYZ movement commands
-  - the Java backend scales each row by `UAV speed × elapsed simulation time` since the previous decision; simultaneous arrivals have zero additional movement budget
-  - movement energy is based on actual bounded flight distance/time, while the simulation tick accounts for baseline hover energy
-  - physical and energy bounds are enforced by the backend
+Target mapping:
 
-The observation includes `action_mask`; selecting a masked target is a constraint violation, not an implicit fallback. A masked but in-range target is accepted as one failed task transition: movement is still applied, the disabled target is not submitted, and the transition records one constraint violation. Out-of-range targets remain protocol errors.
+- `0`: local mobile execution;
+- `1`: cloud through a UAV relay;
+- `2 + i`: UAV `i`.
+
+There is no fixed-edge target. For a cloud action, Java deterministically chooses
+the active UAV with minimum predicted upload-plus-download access delay. Ties
+resolve by ascending UAV ID. The chosen ID is stored on the task and reused on
+download.
+
+Each movement row is an XYZ direction. Java limits its norm, scales it by
+`speed × elapsed simulation time`, enforces physical bounds, and charges actual
+flight/hover energy. Simultaneous task arrivals provide zero extra movement time.
+
+Selecting a masked but in-range target is a constraint violation and failed task
+transition; it is never silently redirected. An out-of-range action is a protocol
+error.
 
 ## Observation
 
-All continuous values are `float32` and normalized to `[0, 1]` using configuration limits.
+All continuous fields are finite `float32` values in `[0, 1]`:
 
-- `time: (1,)`: current simulation time / configured time limit
-- `task: (7,)`: upload size, output size, MI, required cores, deadline, user X, user Y
-- `resources: (3, 3)`: local/cloud/edge available capacity, live VM load, and task-size-aware link delay; an unavailable resource has a zero action mask entry
-- `uavs: (U, 8)`: X, Y, Z, remaining energy, queue, capacity, upload delay, download delay
-- `action_mask: (3 + U,)`: legal local/cloud/edge/UAV targets for the current task
+- `time: (1,)`;
+- `delta_time: (1,)`;
+- `task: (7,)`: input, output, MI, cores, deadline, user X, user Y;
+- `resources: (2, 3)`: local/cloud capacity, load, and link-delay proxy;
+- `uavs: (U, 8)`: XYZ, energy, queue, capacity, upload delay, download delay;
+- `action_mask: MultiBinary(2 + U)`.
 
-No silent padding, truncation, integer coercion, or fallback target is allowed.
+For `U=2`, the continuous part contains 31 values and the mask contains four
+bits. Exponential task variables use a configured 99th-percentile scale; pilot
+acceptance requires their upper-bound saturation rate to remain at or below
+1.5%.
 
-## Reward
+## Network
 
-For the set `S_t` of tasks settled since the preceding decision epoch, the
-backend computes:
+The air-ground path loss is free-space loss plus the expected LoS/NLoS excess
+loss. LoS probability depends on elevation angle and environment parameters.
+Received SNR uses configured transmit power and noise spectral density, and link
+rate is `B log2(1 + SNR)`.
 
-```text
-r_t = sum over i in S_t of clip(
-          success_i
-          - 0.35 * min(latency_i / deadline_i, 2)
-          - 0.15 * min(UE energy_i / UE budget, 2),
-          -1, 1
-      )
-      - 0.20 * min(interval UAV energy / UAV budget, 2)
-      - 0.30 * min(interval constraint violations, 1)
-```
+Total access bandwidth is divided across four orthogonal channels. The least
+loaded deterministic allocation is equivalent to dividing each channel by
+`ceil(active transfers / channels)`. Cloud transfers include both the access hop
+and UAV-cloud backhaul; concurrent cloud transfers share backhaul bandwidth.
 
-The reward returned at a decision epoch is the sum of task contributions that settled since the previous epoch, with interval UAV-energy and boundary penalties counted once. It can therefore be zero/negative when no task settles, or exceed 1 when several tasks settle concurrently. `settled_in_transition`, cumulative task counts, unweighted physical metrics, and normalized reward components are returned in `info` for auditability.
+## Reward and info
 
-## Episode semantics
+Tasks settling between two decision epochs contribute bounded success, latency,
+and UE-energy terms. Interval UAV energy and constraint penalties are charged
+once. Several tasks may settle in one transition, so the interval reward is not
+restricted to `[-1, 1]`.
 
-- `terminated=True`: all configured workload tasks have reached a terminal state and no upload, execution, or download remains in flight; or the system reaches an unrecoverable physical terminal state.
-- `truncated=True`: configured simulation-time or external step limit is reached before natural termination. Any in-flight task is explicitly settled as failed at the configured horizon.
-- They are never collapsed into a single `done` flag.
+`info` includes normalized reward components and raw physical/audit data:
 
-## Seeding
+- elapsed simulation time and effective discount;
+- settled/total/success/failed/in-flight task counts;
+- task latency samples, UE/UAV energy, and constraints;
+- throughput;
+- selected cloud relay;
+- active access/backhaul transfers;
+- UAV queue total/maximum;
+- local/cloud/UAV resource utilization.
 
-`reset(seed)` must recreate the complete Java simulation and propagate the seed to workload generation, mobility, UAV initialization, algorithm sampling, and all other random sources. Repeating `reset(seed)` and the same action sequence must reproduce observations, rewards, terminal flags, and physical metrics.
+## Episode and seed semantics
 
-After an explicit seed initializes Gymnasium's RNG, `reset(seed=None)` derives a new non-negative 63-bit Java episode seed from that persistent RNG stream and returns the actual seed in `info["seed"]`. Re-seeding with the same explicit value restarts the same derived episode-seed sequence. A workload with no task-arrival decision is rejected during reset instead of waiting for a decision timeout.
+`terminated=True` means every configured task has naturally reached a terminal
+state. `truncated=True` means the simulation horizon or external interaction
+budget ended first; unfinished work is explicitly failed. Both flags cannot be
+true together.
 
-## Runtime provenance
+`reset(seed)` rebuilds the Java simulation and propagates the seed to workload,
+mobility, UAV initialization, and other simulator randomness. The same seed and
+action sequence must be bitwise deterministic across fresh JVMs.
 
-GymBridge protocol 1.1 `hello` returns SHA-256 hashes for the actual XML inputs, loaded Java class artifact, and Java source tree, plus Git HEAD and a stale-class check. The Python experiment client compares environment hashes, Git commit, and source-tree hash before reset and records the service provenance in every report.
+## Checkpoints and provenance
 
-## Validation
+GymBridge `hello` returns protocol version, XML manifest, Git commit, Java source
+hash, loaded class hash, and stale-class status. Python verifies them before
+reset and records them in every report.
 
-- `gymnasium.utils.env_checker.check_env` must pass without `skip_render_check` exceptions other than no render mode being configured.
-- Every observation must satisfy `observation_space.contains`.
-- Every accepted action must satisfy `action_space.contains`.
-- Contract tests use a deterministic protocol backend only; it is not a training simulator. The production backend is supplied by GymBridge in phase 3.
+Protocol 1.2 checkpoints include algorithm state, optimizers, pending
+rollout/replay, normalizer, RNG streams, counters, configuration, UAV count, and
+training-seed cursor. Protocol 1.1 checkpoints are rejected rather than migrated
+implicitly.
+
+## Required validation
+
+- Gymnasium environment checker and shape/mask tests;
+- LoS monotonicity, Shannon-rate monotonicity, and four-channel competition;
+- fixed cloud relay across both directions;
+- local/cloud/UAV execution paths and urban/rural/pilot config tests;
+- train/save/load tests for PPO, DDPG, TD3, and DQN zero movement;
+- real Java-Python round trip and fresh-JVM bitwise determinism;
+- pilot checks for finite values, saturation, task/throughput/clock consistency,
+  and all provenance hashes.

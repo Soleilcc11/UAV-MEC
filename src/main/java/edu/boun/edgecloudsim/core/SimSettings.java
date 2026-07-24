@@ -44,7 +44,9 @@ public class SimSettings {
     public int getNumOfEdgeVMs() {
         return edgeDevicesDoc == null ? 0 : edgeDevicesDoc.getElementsByTagName("VM").getLength();
     }
-    public int getNumOfCloudVMs() { return 5; }
+    public int getNumOfCloudVMs() {
+        return getNumOfCloudHost() * getNumOfCloudVMsPerHost();
+    }
     public int getNumOfEdgeHosts() {
         return edgeDevicesDoc == null ? 0 : edgeDevicesDoc.getElementsByTagName("host").getLength();
     }
@@ -189,10 +191,32 @@ public class SimSettings {
         copyTag(settingsDoc, "num_of_uavs", "num_of_uavs");
         copyTag(settingsDoc, "uav_max_energy", "uav_max_energy");
         copyTag(settingsDoc, "uav_initial_height", "uav_initial_height");
+        copyTag(settingsDoc, "uav_min_height", "uav_min_height");
+        copyTag(settingsDoc, "uav_max_height", "uav_max_height");
         copyTag(settingsDoc, "simulation_seed", "simulation_seed");
         copyTag(settingsDoc, "uav_flight_power", "uav_flight_power");
         copyTag(settingsDoc, "uav_hover_power", "uav_hover_power");
         copyTag(settingsDoc, "uav_compute_energy_per_mi", "uav_compute_energy_per_mi");
+        copyTag(settingsDoc, "uav_environment", "uav_environment");
+        copyTag(settingsDoc, "uav_carrier_frequency_hz", "uav_carrier_frequency_hz");
+        copyTag(settingsDoc, "uav_access_bandwidth_mbps", "uav_access_bandwidth_mbps");
+        copyTag(settingsDoc, "uav_access_channels", "uav_access_channels");
+        copyTag(settingsDoc, "uav_tx_power_w", "uav_tx_power_w");
+        copyTag(settingsDoc, "uav_noise_psd_dbm_hz", "uav_noise_psd_dbm_hz");
+        copyTag(settingsDoc, "uav_urban_los_a", "uav_urban_los_a");
+        copyTag(settingsDoc, "uav_urban_los_b", "uav_urban_los_b");
+        copyTag(settingsDoc, "uav_urban_eta_los_db", "uav_urban_eta_los_db");
+        copyTag(settingsDoc, "uav_urban_eta_nlos_db", "uav_urban_eta_nlos_db");
+        copyTag(settingsDoc, "uav_rural_los_a", "uav_rural_los_a");
+        copyTag(settingsDoc, "uav_rural_los_b", "uav_rural_los_b");
+        copyTag(settingsDoc, "uav_rural_eta_los_db", "uav_rural_eta_los_db");
+        copyTag(settingsDoc, "uav_rural_eta_nlos_db", "uav_rural_eta_nlos_db");
+        copyTag(settingsDoc, "uav_cloud_bandwidth_mbps", "uav_cloud_bandwidth_mbps");
+        copyTag(settingsDoc, "uav_cloud_propagation_delay", "uav_cloud_propagation_delay");
+        copyTag(settingsDoc, "uav_cloud_distance_m", "uav_cloud_distance_m");
+        copyTag(settingsDoc, "smdp_discount_base", "smdp_discount_base");
+        copyTag(settingsDoc, "smdp_discount_time_unit_seconds",
+                "smdp_discount_time_unit_seconds");
 
         NodeList spaces = settingsDoc.getElementsByTagName("simulation_space");
         if (spaces.getLength() > 0) {
@@ -453,6 +477,112 @@ public class SimSettings {
      */
     public double getUAVAdditionalPathLoss() {
         return Double.parseDouble(configFile.getProperty("uav_additional_path_loss", "0.0"));
+    }
+
+    public String getUAVEnvironment() {
+        String environment = configFile.getProperty(
+                "uav_environment", "urban").trim().toLowerCase();
+        if (!"urban".equals(environment) && !"rural".equals(environment)) {
+            throw new IllegalArgumentException(
+                    "uav_environment must be urban or rural");
+        }
+        return environment;
+    }
+
+    public double getUAVCarrierFrequencyHz() {
+        return positiveDouble("uav_carrier_frequency_hz", "2000000000");
+    }
+
+    public double getUAVAccessBandwidthMbps() {
+        return positiveDouble("uav_access_bandwidth_mbps", "10");
+    }
+
+    public int getUAVAccessChannelCount() {
+        int count = Integer.parseInt(configFile.getProperty(
+                "uav_access_channels", "4"));
+        if (count <= 0) {
+            throw new IllegalArgumentException(
+                    "uav_access_channels must be positive");
+        }
+        return count;
+    }
+
+    public double getUAVTransmitPowerWatts() {
+        return positiveDouble("uav_tx_power_w", "0.1");
+    }
+
+    public double getUAVNoisePsdDbmPerHz() {
+        return Double.parseDouble(configFile.getProperty(
+                "uav_noise_psd_dbm_hz", "-174"));
+    }
+
+    public double getUAVLoSA() {
+        String prefix = "rural".equals(getUAVEnvironment()) ? "uav_rural" : "uav_urban";
+        return positiveDouble(
+                prefix + "_los_a",
+                "rural".equals(getUAVEnvironment()) ? "4.88" : "9.61");
+    }
+
+    public double getUAVLoSB() {
+        String prefix = "rural".equals(getUAVEnvironment()) ? "uav_rural" : "uav_urban";
+        return positiveDouble(
+                prefix + "_los_b",
+                "rural".equals(getUAVEnvironment()) ? "0.43" : "0.16");
+    }
+
+    public double getUAVEtaLoSDb() {
+        String prefix = "rural".equals(getUAVEnvironment()) ? "uav_rural" : "uav_urban";
+        return Double.parseDouble(configFile.getProperty(
+                prefix + "_eta_los_db", "rural".equals(getUAVEnvironment()) ? "0.1" : "1.0"));
+    }
+
+    public double getUAVEtaNLoSDb() {
+        String prefix = "rural".equals(getUAVEnvironment()) ? "uav_rural" : "uav_urban";
+        return Double.parseDouble(configFile.getProperty(
+                prefix + "_eta_nlos_db", "rural".equals(getUAVEnvironment()) ? "21.0" : "20.0"));
+    }
+
+    public double getUAVCloudBandwidthMbps() {
+        return positiveDouble("uav_cloud_bandwidth_mbps", "100");
+    }
+
+    public double getUAVCloudPropagationDelay() {
+        return nonnegativeDouble("uav_cloud_propagation_delay", "0.02");
+    }
+
+    public double getUAVCloudDistanceMeters() {
+        return nonnegativeDouble("uav_cloud_distance_m", "20000");
+    }
+
+    public double getSmdpDiscountBase() {
+        double value = positiveDouble("smdp_discount_base", "0.99");
+        if (value > 1.0) {
+            throw new IllegalArgumentException(
+                    "smdp_discount_base must not exceed one");
+        }
+        return value;
+    }
+
+    public double getSmdpDiscountTimeUnitSeconds() {
+        return positiveDouble("smdp_discount_time_unit_seconds", "1.0");
+    }
+
+    private double positiveDouble(String key, String defaultValue) {
+        double value = Double.parseDouble(
+                configFile.getProperty(key, defaultValue));
+        if (!Double.isFinite(value) || value <= 0.0) {
+            throw new IllegalArgumentException(key + " must be positive");
+        }
+        return value;
+    }
+
+    private double nonnegativeDouble(String key, String defaultValue) {
+        double value = Double.parseDouble(
+                configFile.getProperty(key, defaultValue));
+        if (!Double.isFinite(value) || value < 0.0) {
+            throw new IllegalArgumentException(key + " must be non-negative");
+        }
+        return value;
     }
 
     public double getManBandwidth() {

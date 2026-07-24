@@ -28,6 +28,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from .contract import PROTOCOL_VERSION
 from .ppo import (
     InvalidActionMaskError,
     RunningObservationNormalizer,
@@ -44,9 +45,9 @@ __all__ = [
 
 
 _OBSERVATION_KEYS = frozenset(
-    {"time", "task", "resources", "uavs", "action_mask"}
+    {"time", "delta_time", "task", "resources", "uavs", "action_mask"}
 )
-_CONTINUOUS_KEYS = ("time", "task", "resources", "uavs")
+_CONTINUOUS_KEYS = ("time", "delta_time", "task", "resources", "uavs")
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,7 @@ class ReplayBuffer:
         "targets",
         "movements",
         "rewards",
+        "discounts",
         "next_states",
         "next_action_masks",
         "terminated",
@@ -166,6 +168,7 @@ class ReplayBuffer:
         self.targets = np.zeros(capacity, dtype=np.int64)
         self.movements = np.zeros((capacity, movement_dim), dtype=np.float32)
         self.rewards = np.zeros(capacity, dtype=np.float32)
+        self.discounts = np.zeros(capacity, dtype=np.float32)
         self.next_states = np.zeros((capacity, observation_dim), dtype=np.float32)
         self.next_action_masks = np.zeros((capacity, target_count), dtype=np.bool_)
         self.terminated = np.zeros(capacity, dtype=np.bool_)
@@ -184,6 +187,7 @@ class ReplayBuffer:
         target: int,
         movement: np.ndarray,
         reward: float,
+        discount: float,
         next_state: np.ndarray,
         next_action_mask: np.ndarray,
         terminated: bool,
@@ -214,6 +218,8 @@ class ReplayBuffer:
             raise ValueError("replay movement must be finite and in [-1, 1]")
         if not math.isfinite(float(reward)):
             raise ValueError("replay reward must be finite")
+        if not math.isfinite(float(discount)) or not 0.0 <= discount <= 1.0:
+            raise ValueError("replay discount must be finite and lie in [0, 1]")
 
         index = self.position
         self.states[index] = state
@@ -221,6 +227,7 @@ class ReplayBuffer:
         self.targets[index] = int(target)
         self.movements[index] = movement
         self.rewards[index] = float(reward)
+        self.discounts[index] = float(discount)
         self.next_states[index] = next_state
         self.next_action_masks[index] = next_action_mask
         self.terminated[index] = bool(terminated)
@@ -378,7 +385,7 @@ class MixedActionTD3:
     """TD3 with a masked categorical target and continuous UAV movement."""
 
     name = "mixed_action_td3"
-    checkpoint_format_version = 1
+    checkpoint_format_version = 2
 
     def __init__(
         self,
@@ -389,8 +396,8 @@ class MixedActionTD3:
         if number_of_uavs <= 0:
             raise ValueError("number_of_uavs must be positive")
         self.number_of_uavs = int(number_of_uavs)
-        self.target_count = 3 + self.number_of_uavs
-        self.observation_dim = 1 + 7 + 3 * 3 + self.number_of_uavs * 8
+        self.target_count = 2 + self.number_of_uavs
+        self.observation_dim = 2 + 7 + 2 * 3 + self.number_of_uavs * 8
         self.movement_dim = self.number_of_uavs * 3
         self.config = config if config is not None else TD3Config()
         self.device = torch.device(self.config.device)
@@ -481,8 +488,9 @@ class MixedActionTD3:
             )
         expected_shapes = {
             "time": (1,),
+            "delta_time": (1,),
             "task": (7,),
-            "resources": (3, 3),
+            "resources": (2, 3),
             "uavs": (self.number_of_uavs, 8),
             "action_mask": (self.target_count,),
         }
@@ -625,6 +633,7 @@ class MixedActionTD3:
         next_observation: Mapping[str, np.ndarray],
         terminated: bool,
         truncated: bool,
+        discount: float | None = None,
     ) -> None:
         if terminated and truncated:
             raise ValueError("a transition cannot be both terminated and truncated")
@@ -641,6 +650,7 @@ class MixedActionTD3:
             target=int(sample.action["target"]),
             movement=np.asarray(sample.action["movement"], dtype=np.float32),
             reward=float(reward),
+            discount=self.config.gamma if discount is None else float(discount),
             next_state=next_state,
             next_action_mask=next_mask,
             terminated=bool(terminated),
@@ -667,6 +677,7 @@ class MixedActionTD3:
         ).to(dtype=torch.float32)
         movements = torch.from_numpy(batch["movements"]).to(self.device)
         rewards = torch.from_numpy(batch["rewards"]).to(self.device)
+        discounts = torch.from_numpy(batch["discounts"]).to(self.device)
         terminated = torch.from_numpy(batch["terminated"]).to(self.device)
         truncated = torch.from_numpy(batch["truncated"]).to(self.device)
 
@@ -703,7 +714,7 @@ class MixedActionTD3:
             target_q1, target_q2 = self.target_critic(
                 next_states, next_target_vectors, next_movements
             )
-            q_target = rewards + self.config.gamma * will_bootstrap.to(
+            q_target = rewards + discounts * will_bootstrap.to(
                 dtype=rewards.dtype
             ) * torch.minimum(target_q1, target_q2)
 
@@ -784,6 +795,7 @@ class MixedActionTD3:
             {
                 "format_version": self.checkpoint_format_version,
                 "algorithm": self.name,
+                "protocol_version": PROTOCOL_VERSION,
                 "number_of_uavs": self.number_of_uavs,
                 "seed": self.seed,
                 "config": asdict(self.config),
@@ -808,10 +820,15 @@ class MixedActionTD3:
     @classmethod
     def load_checkpoint(cls, path: str | Path) -> "MixedActionTD3":
         payload = torch.load(Path(path), map_location="cpu", weights_only=False)
-        if payload.get("format_version") != cls.checkpoint_format_version:
-            raise ValueError("Unsupported TD3 checkpoint format")
-        if payload.get("algorithm") != cls.name:
-            raise ValueError("Checkpoint is not a mixed-action TD3 checkpoint")
+        if (
+            payload.get("format_version") != cls.checkpoint_format_version
+            or payload.get("algorithm") != cls.name
+            or payload.get("protocol_version") != PROTOCOL_VERSION
+        ):
+            raise ValueError(
+                "unsupported TD3 checkpoint; protocol 1.1 checkpoints "
+                "cannot be loaded by GymBridge 1.2"
+            )
         agent = cls(
             int(payload["number_of_uavs"]),
             config=TD3Config(**payload["config"]),

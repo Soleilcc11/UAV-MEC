@@ -14,8 +14,9 @@ from uav_mec_gym.evaluation import (
 
 def _observation():
     return {
-        "action_mask": np.array([0, 1, 1, 1, 0], dtype=np.int8),
-        "resources": np.array([[0, 0, 0], [1, 0, 0.4], [1, 0, 0.2]], dtype=np.float32),
+        "task": np.zeros(7, dtype=np.float32),
+        "action_mask": np.array([0, 1, 1, 1], dtype=np.int8),
+        "resources": np.array([[0, 0, 0], [1, 0, 0.4]], dtype=np.float32),
         "uavs": np.array([
             [0, 0, 0, 1, 0, 1, 0.05, 0.05],
             [0, 0, 0, 1, 0, 1, 0.01, 0.01],
@@ -88,6 +89,19 @@ class _TwoStepEnvironment:
             )
         }
         info["total_tasks"] = 2
+        info.update({
+            "uav_queue_length_total": float(self.step_number),
+            "uav_queue_length_max": float(self.step_number),
+            "active_access_uploads": 0.0,
+            "active_access_downloads": 0.0,
+            "active_backhaul_uploads": 0.0,
+            "active_backhaul_downloads": 0.0,
+            "local_resource_utilization": 0.1,
+            "cloud_resource_utilization": 0.2,
+            "uav_resource_utilization": 0.3,
+        })
+        info["settled_in_transition"] = 1
+        info["settled_task_latencies_seconds"] = [frame["latency_seconds"]]
         info["reward_components"] = {
             "success": frame["success"],
             "latency_ratio": frame["latency_seconds"] / frame["deadline_seconds"],
@@ -125,6 +139,11 @@ def test_evaluate_policy_aggregates_raw_metrics_and_preserves_episode_status():
         "uav_energy_joules": 3.0,
         "constraint_violations": 1.0,
     }
+    assert results[0].audit_metric_means["uav_queue_length_total"] == 1.5
+    assert results[0].audit_metric_maxima["uav_queue_length_max"] == 2.0
+    assert results[0].target_ratios["uav"] == 1.0
+    assert results[0].target_ratios["offloaded"] == 1.0
+    assert results[0].exponential_saturation_rate == 0.0
 
 
 def _episode(policy, seed, reward, latency):

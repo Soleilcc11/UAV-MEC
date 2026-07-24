@@ -17,30 +17,48 @@ import numpy as np
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-FORMAL_CONFIG = REPOSITORY / "experiments/formal_protocol_1_1_10seed.json"
+FORMAL_CONFIG = REPOSITORY / "experiments/formal_protocol_1_2_10seed.json"
 DEFAULT_SUMMARY = (
     REPOSITORY
     / json.loads(FORMAL_CONFIG.read_text(encoding="utf-8"))["output_root"]
     / "summary/formal_summary.json"
 )
 ALGORITHM_LABELS = {
+    "masked_parameterized_action_ddpg": "Masked parameterized-action DDPG",
     "mixed_action_ppo": "Mixed-action PPO",
+    "masked_dqn_zero_movement": "Masked DQN (zero-movement ablation)",
     "mixed_action_td3": "Mixed-action TD3",
     "minimum_estimated_delay": "Min. estimated delay",
     "random_masked": "Masked random",
+    "local_only": "Local only",
+    "cloud_only": "Cloud only",
 }
 COLORS = {
+    "masked_parameterized_action_ddpg": "#009E73",
     "mixed_action_ppo": "#0072B2",
     "mixed_action_td3": "#D55E00",
+    "masked_dqn_zero_movement": "#CC79A7",
     "minimum_estimated_delay": "#222222",
     "random_masked": "#777777",
+    "local_only": "#56B4E9",
+    "cloud_only": "#E69F00",
 }
 MARKERS = {
+    "masked_parameterized_action_ddpg": "P",
     "mixed_action_ppo": "o",
     "mixed_action_td3": "s",
+    "masked_dqn_zero_movement": "X",
     "minimum_estimated_delay": "D",
     "random_masked": "^",
+    "local_only": "v",
+    "cloud_only": ">",
 }
+LEARNED_ALGORITHMS = (
+    "masked_parameterized_action_ddpg",
+    "mixed_action_ppo",
+    "masked_dqn_zero_movement",
+    "mixed_action_td3",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -78,7 +96,7 @@ def _configure_style() -> None:
             "savefig.dpi": 300,
             "figure.dpi": 120,
             "svg.fonttype": "none",
-            "svg.hashsalt": "uav-mec-formal-protocol-1-1",
+            "svg.hashsalt": "uav-mec-formal-protocol-1-2",
             "pdf.fonttype": 42,
             "ps.fonttype": 42,
         }
@@ -118,7 +136,9 @@ def plot_training_curves(
     summary: Mapping[str, Any], output_dir: Path, summary_sha256: str
 ) -> list[str]:
     figure, axis = plt.subplots(figsize=(7.15, 3.25), constrained_layout=True)
-    for algorithm in ("mixed_action_ppo", "mixed_action_td3"):
+    for algorithm in LEARNED_ALGORITHMS:
+        if algorithm not in summary["training_curves"]:
+            continue
         points = summary["training_curves"][algorithm]["summary"]
         x = np.asarray([point["interaction_end"] for point in points], dtype=float)
         mean = np.asarray([point["mean"] for point in points], dtype=float)
@@ -148,7 +168,7 @@ def plot_training_curves(
 def _policy_values(
     summary: Mapping[str, Any], policy: str, metric: str
 ) -> tuple[np.ndarray, Mapping[str, Any]]:
-    if policy in ("mixed_action_ppo", "mixed_action_td3"):
+    if policy in summary["summaries"]["candidates"]:
         values = summary["replicate_means"][policy]["heldout"][metric]
         stats = summary["summaries"]["candidates"][policy]["heldout"][metric]
     else:
@@ -160,21 +180,38 @@ def _policy_values(
 def plot_heldout_performance(
     summary: Mapping[str, Any], output_dir: Path, summary_sha256: str
 ) -> list[str]:
-    metrics = (
+    available_metrics = (
         ("total_reward", "Episode reward", 1.0),
-        ("success_rate", "Task success (%)", 100.0),
+        ("deadline_success_rate", "Deadline success (%)", 100.0),
         ("latency_per_settled_task_seconds", "Latency per settled task (s)", 1.0),
+        ("latency_p95_seconds", "P95 task latency (s)", 1.0),
         ("energy_per_settled_task_joules", "Energy per settled task (J)", 1.0),
+        ("throughput_tasks_per_second", "Throughput (tasks/s)", 1.0),
+        ("constraint_violations", "Constraint violations", 1.0),
+        ("average_uav_queue_length", "Mean UAV queue length", 1.0),
+        ("max_uav_queue_length", "Maximum UAV queue length", 1.0),
+        ("uav_resource_utilization", "Mean UAV utilization (%)", 100.0),
+        ("offload_ratio", "Offloaded decisions (%)", 100.0),
     )
+    baseline_metrics = summary["summaries"]["baselines"][
+        "minimum_estimated_delay"
+    ]["heldout"]
+    metrics = tuple(item for item in available_metrics if item[0] in baseline_metrics)
     policies = (
         "minimum_estimated_delay",
         "random_masked",
-        "mixed_action_ppo",
-        "mixed_action_td3",
+        "local_only",
+        "cloud_only",
+        *(name for name in LEARNED_ALGORITHMS
+          if name in summary["summaries"]["candidates"]),
     )
-    figure, axes = plt.subplots(2, 2, figsize=(7.15, 5.15), constrained_layout=True)
+    row_count = (len(metrics) + 1) // 2
+    figure, axes = plt.subplots(
+        row_count, 2, figsize=(7.15, 2.45 * row_count),
+        constrained_layout=True, squeeze=False,
+    )
     rng = np.random.default_rng(20260718)
-    for axis, (metric, ylabel, scale) in zip(axes.flat, metrics, strict=True):
+    for axis, (metric, ylabel, scale) in zip(axes.flat, metrics):
         for index, policy in enumerate(policies):
             values, stats = _policy_values(summary, policy, metric)
             jitter = rng.uniform(-0.10, 0.10, size=values.size)
@@ -211,6 +248,8 @@ def plot_heldout_performance(
         )
         axis.set_ylabel(ylabel)
         _finish_axis(axis)
+    for axis in axes.flat[len(metrics):]:
+        axis.set_visible(False)
     axes[0, 0].set_title("Held-out performance: points and bootstrap 95% CI", loc="left")
     return _save_figure(
         figure, output_dir, "heldout_performance", summary_sha256
@@ -222,14 +261,20 @@ def plot_paired_effects(
 ) -> list[str]:
     metrics = (
         ("total_reward", "Reward difference"),
-        ("success_rate", "Success-rate difference (percentage points)"),
+        (
+            "deadline_success_rate",
+            "Deadline-success difference (percentage points)",
+        ),
         ("latency_per_settled_task_seconds", "Latency/task difference (s)"),
         ("energy_per_settled_task_joules", "Energy/task difference (J)"),
     )
-    algorithms = ("mixed_action_ppo", "mixed_action_td3")
+    algorithms = tuple(
+        name for name in LEARNED_ALGORITHMS
+        if name in summary["summaries"]["paired"]
+    )
     figure, axes = plt.subplots(2, 2, figsize=(7.15, 4.65), constrained_layout=True)
     for axis, (metric, xlabel) in zip(axes.flat, metrics, strict=True):
-        scale = 100.0 if metric == "success_rate" else 1.0
+        scale = 100.0 if metric == "deadline_success_rate" else 1.0
         axis.axvline(0.0, color="#555555", linewidth=0.8, zorder=0)
         for index, algorithm in enumerate(algorithms):
             stats = summary["summaries"]["paired"][algorithm]["heldout"][metric][
@@ -267,7 +312,8 @@ def create_figures(summary_path: Path, output_dir: Path) -> dict[str, Any]:
         "training_curves": {
             "files": plot_training_curves(summary, output_dir, summary_sha256),
             "caption": (
-                "Mean per-interaction training reward in 256-interaction bins. "
+                "Mean per-interaction training reward in "
+                f"{summary.get('training_curve_bin_size', 2000)}-interaction bins. "
                 "Bands are nonparametric 95% confidence intervals across ten "
                 "independent training seeds."
             ),
@@ -291,7 +337,8 @@ def create_figures(summary_path: Path, output_dir: Path) -> dict[str, Any]:
         },
     }
     manifest = {
-        "format_version": 1,
+        "format_version": 2,
+        "protocol_version": "1.2",
         "source_summary": str(summary_path),
         "source_summary_sha256": summary_sha256,
         "figures": figures,

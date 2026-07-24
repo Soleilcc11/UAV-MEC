@@ -1,121 +1,121 @@
-# Formal protocol 1.1 experiment
+# Formal protocol 1.2 experiment
 
 ## Scope
 
-The formal matrix compares masked random, minimum estimated delay,
-mixed-action PPO, and mixed-action TD3 on the real Java/EdgeCloudSim
-GymBridge. The legacy synthetic Python environment and historical DDPG/DQN
-artifacts are excluded.
+The formal matrix evaluates the real Java/EdgeCloudSim GymBridge 1.2 system.
+The legacy synthetic Python environment and protocol 1.1 checkpoints/results are
+excluded.
 
-The machine-readable specification is
-[`experiments/formal_protocol_1_1_10seed.json`](../../experiments/formal_protocol_1_1_10seed.json).
+The authoritative specification is
+[`experiments/formal_protocol_1_2_10seed.json`](../../experiments/formal_protocol_1_2_10seed.json).
 
-## Independent replication and budgets
+## Environment and actions
 
-- PPO and TD3 each use 10 independent training seed starts.
-- Every learned-policy replicate receives exactly 4,096 real GymBridge
-  interactions, 64 times the protocol 1.1 smoke budget.
-- Validation uses 10 paired environment seeds (`201`–`210`).
-- Held-out evaluation uses 10 disjoint paired seeds (`301`–`310`).
-- Training seed ranges are spaced by 10,000, so even the upper bound of one new
-  environment seed per interaction cannot overlap another replicate.
-- Checkpoint selection is the final fixed-budget checkpoint. There is no
-  held-out-driven checkpoint selection or hyperparameter tuning.
+- Urban training/validation: 2 UAVs, 25 users, 3600 seconds.
+- Rural held-out: 2 UAVs, 15 users, 3600 seconds.
+- Targets: local, cloud, UAV 0, UAV 1.
+- Movement: bounded XYZ control for both UAVs.
+- Access link: probabilistic LoS/NLoS, SNR, Shannon rate, four channels.
+- Cloud: one deterministic UAV relay retained for both directions, with shared
+  backhaul.
+- Transition discount: `gamma_0 ** (delta_t / tau)`.
 
-The formal unit of replication for learned policies is the independently
-trained checkpoint. Each checkpoint is evaluated on all 10 paired environment
-seeds; metrics are first averaged within checkpoint and uncertainty is then
-computed across the 10 training-seed means. This avoids treating the 100
-checkpoint-by-environment episodes as 100 independent training runs.
+## Learned policies and baselines
 
-## Mixed-action TD3 definition
+Main comparisons:
 
-TD3's twin critics, delayed actor updates, and target-policy smoothing follow
-the original algorithm described by Fujimoto, van Hoof, and Meger,
-“[Addressing Function Approximation Error in Actor-Critic Methods](https://arxiv.org/abs/1802.09477).”
-Because original TD3 assumes continuous actions, this repository explicitly
-uses a parameterized-action extension:
+1. `masked_parameterized_action_ddpg`;
+2. `mixed_action_ppo`;
+3. `mixed_action_td3`.
 
-- the actor emits masked target logits and a `tanh` movement vector;
-- execution uses the legal target argmax and bounded movement;
-- critics consume target one-hot plus movement;
-- target smoothing applies only to movement;
-- the discrete actor head uses a hard straight-through masked softmax during
-  gradient calculation.
-- time-limit transitions bootstrap only when GymBridge exposes a legal next
-  decision; the terminal zero-observation has no valid target action and is
-  therefore treated as non-bootstrappable.
+They share the same observations, actions, reward, budget, environment, and
+training-seed starts. DDPG and TD3 are parameterized-action extensions, not
+claims about the original continuous-only algorithms.
 
-This is named `mixed_action_td3`, not “vanilla TD3.” Parameterized action-space
-background is described by Hausknecht and Stone,
-“[Deep Reinforcement Learning in Parameterized Action Space](https://arxiv.org/abs/1511.04143),”
-and Xiong et al.,
-“[Parametrized Deep Q-Networks Learning](https://arxiv.org/abs/1810.06394).”
+`masked_dqn_zero_movement` is an action-capability ablation. It observes the same
+state and chooses a masked target, but every movement value is zero.
 
-## Metrics and uncertainty
+Non-learning baselines are masked random, minimum estimated delay, local only,
+and cloud only.
 
-The primary held-out views are:
+## Replication and seed partitions
 
-- total episode reward (higher is better);
-- successful tasks divided by settled tasks (higher is better);
-- latency seconds per settled task (lower is better);
-- UE plus UAV energy joules per settled task (lower is better);
-- constraint violations per episode (lower is better).
+- Each learned policy has 10 independently trained checkpoints.
+- All algorithms use the same 10 training seed starts.
+- Each checkpoint receives exactly 200,000 real GymBridge interactions.
+- Urban validation uses paired seeds `201–210`.
+- Rural held-out evaluation uses paired seeds `301–310`.
+- Held-out seeds cannot tune hyperparameters, select checkpoints, or stop
+  training.
+- The selected checkpoint is the final fixed-budget checkpoint regardless of
+  observed performance.
 
-All raw metrics originate in Java and retain their physical units. The summary
-uses a deterministic 20,000-resample nonparametric bootstrap. Candidate
-intervals resample 10 independent training-seed means. Baseline intervals
-resample 10 paired environment seeds. Paired-effect intervals subtract the
-same environment seed's baseline before averaging within training checkpoint,
-then resample the 10 checkpoint means.
+The learned-policy replication unit is the independently trained checkpoint.
+Metrics are averaged over the ten environment seeds within a checkpoint, then
+uncertainty is calculated across ten checkpoint means. The 100
+checkpoint-by-environment episodes are not treated as 100 independent training
+runs.
 
-These intervals quantify uncertainty for the declared seed populations; they
-do not establish universal algorithm superiority or substitute for additional
-workloads.
+## Metrics
 
-## Run and resume
+Primary metric:
 
-The runner refuses a dirty tracked tree, performs a clean Maven package, starts
-the exact protocol 1.1 services, and resumes only when the report matches the
-formal config hash, Git commit, environment hash, source-tree hash, training
-seed, interaction budget, and checkpoint hash. Every training report,
-validation report, and held-out report runs in a fresh JVM. This isolates
-EdgeCloudSim process-level static state and makes repeated deterministic
-baselines comparable across learned checkpoints. Dry runs only print commands
-and never create or replace the orchestration manifest.
+- successful tasks completed by their deadline divided by settled tasks.
 
-At natural termination, GymBridge freezes the terminal observation, reward,
-physical metrics, and episode counters atomically on the CloudSim event thread,
-then stops the simulator after the current timestamp batch. Terminal UAV energy
-therefore cannot depend on when the socket thread reads the response.
+Secondary metrics:
+
+- mean and P95 task latency;
+- UE and UAV energy;
+- throughput;
+- constraint violations;
+- mean and maximum UAV queue length;
+- local, cloud, and UAV resource utilization;
+- local/cloud/UAV target ratios and total offload ratio.
+
+All physical values originate in Java. Raw episode rows are retained even when a
+learned policy loses to a baseline.
+
+## Uncertainty
+
+The summary uses 20,000 deterministic nonparametric bootstrap resamples.
+
+- Candidate intervals resample the ten independent checkpoint means.
+- Baseline intervals resample the ten paired environment seeds.
+- Candidate-minus-baseline effects first subtract the same environment seed
+  within each checkpoint, average within checkpoint, and then resample the ten
+  checkpoint differences.
+
+These intervals quantify uncertainty under the declared seed population; they
+do not prove universal superiority.
+
+## Pilot gate
+
+Before the formal matrix, run:
 
 ```bash
+.venv/bin/python scripts/run_pilot_audit.py
+```
+
+The pilot covers all four algorithms with one shared training seed and 512
+interactions each. It must report `passed`, contain no non-finite values, keep
+exponential saturation at or below 1.5%, reconcile tasks/latencies/throughput
+with the simulation clock, and match all provenance hashes.
+
+## Formal execution
+
+```bash
+.venv/bin/python scripts/run_formal_experiments.py --dry-run --max-runs 1
 .venv/bin/python scripts/run_formal_experiments.py
 .venv/bin/python scripts/summarize_formal_experiments.py
 .venv/bin/python scripts/plot_formal_results.py
 ```
 
-Useful bounded checks:
+The runner requires a clean committed tree, performs a clean Java build, and
+uses a fresh JVM for each training or evaluation report. A completed item is
+skipped only when its protocol/config/Git/source/environment/seed/budget and
+checkpoint hashes all match.
 
-```bash
-# Print the first matrix command without executing it.
-.venv/bin/python scripts/run_formal_experiments.py --dry-run --max-runs 1
-
-# Resume one algorithm; completed hash-valid runs are skipped.
-.venv/bin/python scripts/run_formal_experiments.py --only mixed_action_td3
-```
-
-## Machine audit
-
-The summary refuses to complete unless:
-
-- all 20 training reports contain exactly 4,096 contiguous raw transitions;
-- every checkpoint hash matches training and both evaluation reports;
-- all evaluation audits pass on the declared paired seeds;
-- Git and environment hashes are constant within the matrix;
-- repeated deterministic baseline metrics are identical across reports;
-- orchestration records the fresh-JVM-per-report lifecycle;
-- each algorithm has exactly 10 independent training replicates.
-
-Smoke results remain under `results/phase4/` and are not merged into the formal
-matrix.
+The aggregate audit refuses to complete unless every algorithm has ten
+checkpoints, every checkpoint contains exactly 200,000 contiguous transitions,
+all paired evaluations pass, repeated baselines are deterministic, and the
+entire matrix shares one Git/source/config provenance.

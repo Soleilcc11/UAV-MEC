@@ -36,9 +36,9 @@
 		 startTime=_startTime;
 		 taskType=_taskType;
  
-		 inputFileSize = (long)expRngList[_taskType][0].sample();
-		 outputFileSize =(long)expRngList[_taskType][1].sample();
-		 length = (long)expRngList[_taskType][2].sample();
+		 inputFileSize = Math.max(1L, (long)expRngList[_taskType][0].sample());
+		 outputFileSize = Math.max(1L, (long)expRngList[_taskType][1].sample());
+		 length = Math.max(1L, (long)expRngList[_taskType][2].sample());
  
 		 // 修复: 安全访问任务查询表
 		 Object taskLookupTable = SimSettings.getInstance().getTaskLookUpTable();
@@ -60,9 +60,9 @@
 		 this.mobileDeviceId = mobileDeviceId;
 		 this.startTime = startTime;
 		 taskType = 0;
-		 inputFileSize = (long)expRngList[0].sample();
-		 outputFileSize = (long)expRngList[1].sample();
-		 length = (long) expRngList[2].sample();
+		 inputFileSize = Math.max(1L, (long)expRngList[0].sample());
+		 outputFileSize = Math.max(1L, (long)expRngList[1].sample());
+		 length = Math.max(1L, (long) expRngList[2].sample());
 		 
 		 // 修复: 安全访问任务查询表
 		 Object taskLookupTable = SimSettings.getInstance().getTaskLookUpTable();

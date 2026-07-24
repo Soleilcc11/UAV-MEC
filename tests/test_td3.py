@@ -29,13 +29,14 @@ def _config(**overrides):
 
 def _observation(*, terminal=False, offset=0.0, mask=None):
     if mask is None:
-        mask = [0, 1, 1, 1, 1]
+        mask = [0, 1, 1, 1]
     return {
         "time": np.array([offset], dtype=np.float32),
+        "delta_time": np.array([offset], dtype=np.float32),
         "task": np.full(7, 0.1 + offset, dtype=np.float32),
-        "resources": np.full((3, 3), 0.2 + offset, dtype=np.float32),
+        "resources": np.full((2, 3), 0.2 + offset, dtype=np.float32),
         "uavs": np.full((2, 8), 0.3 + offset, dtype=np.float32),
-        "action_mask": np.zeros(5, dtype=np.int8)
+        "action_mask": np.zeros(4, dtype=np.int8)
         if terminal
         else np.asarray(mask, dtype=np.int8),
     }
@@ -72,10 +73,10 @@ def test_deterministic_action_obeys_mask_and_movement_bounds():
         for parameter in agent.actor.parameters():
             parameter.zero_()
         agent.actor.target_head.bias.copy_(
-            torch.tensor([100.0, 3.0, 2.0, 1.0, 0.0])
+            torch.tensor([100.0, 3.0, 2.0, 1.0])
         )
 
-    action = agent.act(_observation(mask=[0, 1, 1, 0, 0]))
+    action = agent.act(_observation(mask=[0, 1, 1, 0]))
 
     assert action["target"] == 1
     assert np.asarray(action["movement"]).shape == (2, 3)
@@ -85,7 +86,7 @@ def test_deterministic_action_obeys_mask_and_movement_bounds():
 def test_all_masked_observation_is_rejected():
     agent = MixedActionTD3(2, _config(), seed=7)
     with pytest.raises(InvalidActionMaskError):
-        agent.act(_observation(mask=[0, 0, 0, 0, 0]))
+        agent.act(_observation(mask=[0, 0, 0, 0]))
 
 
 def test_straight_through_target_has_hard_forward_and_zero_masked_gradient():
@@ -216,6 +217,20 @@ def test_checkpoint_resume_preserves_replay_rng_and_next_update(tmp_path: Path):
             torch.testing.assert_close(
                 actual_state[key], expected_state[key], rtol=0, atol=0
             )
+
+
+def test_protocol_1_1_td3_checkpoint_is_rejected(tmp_path: Path):
+    agent = MixedActionTD3(2, _config(), seed=18)
+    checkpoint = tmp_path / "td3-1.2.pt"
+    legacy = tmp_path / "td3-1.1.pt"
+    agent.save_checkpoint(checkpoint)
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    payload["format_version"] = 1
+    payload["protocol_version"] = "1.1"
+    torch.save(payload, legacy)
+
+    with pytest.raises(ValueError, match="1.1"):
+        MixedActionTD3.load_checkpoint(legacy)
 
 
 def test_training_seed_cursor_is_checkpointed_and_rejects_a_new_schedule(

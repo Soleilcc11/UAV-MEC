@@ -18,14 +18,15 @@ from uav_mec_gym.ppo import (
 
 def _observation(
     *,
-    action_mask: Sequence[int] = (1, 1, 1, 1, 1),
+    action_mask: Sequence[int] = (1, 1, 1, 1),
     offset: float = 0.0,
 ) -> dict[str, np.ndarray]:
     """Small observation satisfying the frozen two-UAV Gymnasium contract."""
     return {
         "time": np.array([0.2 + offset], dtype=np.float32),
+        "delta_time": np.array([0.1 + offset], dtype=np.float32),
         "task": np.linspace(0.1, 0.7, 7, dtype=np.float32) + offset,
-        "resources": np.full((3, 3), 0.4 + offset, dtype=np.float32),
+        "resources": np.full((2, 3), 0.4 + offset, dtype=np.float32),
         "uavs": np.full((2, 8), 0.3 + offset, dtype=np.float32),
         "action_mask": np.asarray(action_mask, dtype=np.int8),
     }
@@ -104,7 +105,7 @@ def test_masked_target_distribution_has_exact_zero_probability_for_illegal_actio
 
 def test_sampling_never_selects_a_masked_target_and_all_masked_fails_explicitly():
     agent = MixedActionPPO(2, _config(normalize_observations=False), seed=7)
-    observation = _observation(action_mask=(0, 1, 0, 1, 0))
+    observation = _observation(action_mask=(0, 1, 0, 1))
 
     sampled_targets = {
         int(agent.sample_action(observation).action["target"]) for _ in range(128)
@@ -112,7 +113,7 @@ def test_sampling_never_selects_a_masked_target_and_all_masked_fails_explicitly(
 
     assert sampled_targets <= {1, 3}
     with pytest.raises(ValueError, match=r"(?i)(mask|valid|legal|enabled)"):
-        agent.sample_action(_observation(action_mask=(0, 0, 0, 0, 0)))
+        agent.sample_action(_observation(action_mask=(0, 0, 0, 0)))
 
 
 def test_observation_contract_rejects_missing_keys_and_wrong_shapes():
@@ -142,7 +143,7 @@ def test_movement_has_frozen_shape_and_bounds(deterministic: bool):
 
 def test_stored_old_log_probability_is_joint_probability_of_realized_action():
     agent = MixedActionPPO(2, _config(normalize_observations=False), seed=19)
-    observation = _observation(action_mask=(1, 0, 1, 1, 0))
+    observation = _observation(action_mask=(1, 0, 1, 1))
     sample = agent.sample_action(observation)
 
     expected_joint = _scalar(sample.target_log_prob) + _scalar(
@@ -153,7 +154,7 @@ def test_stored_old_log_probability_is_joint_probability_of_realized_action():
     agent.store_transition(
         sample,
         reward=0.5,
-        next_observation=_observation(action_mask=(1, 1, 0, 1, 0), offset=0.01),
+        next_observation=_observation(action_mask=(1, 1, 0, 1), offset=0.01),
         terminated=False,
         truncated=False,
     )
@@ -227,6 +228,22 @@ def test_gae_truncation_bootstrap_is_configurable(
     np.testing.assert_allclose(returns, [expected_return])
 
 
+def test_gae_uses_per_transition_smdp_discounts():
+    advantages, returns = compute_gae(
+        rewards=np.array([0.0, 1.0]),
+        values=np.array([0.0, 0.0]),
+        next_values=np.array([1.0, 0.0]),
+        terminated=np.array([False, True]),
+        truncated=np.array([False, False]),
+        gamma=0.99,
+        discounts=np.array([0.5, 0.25]),
+        gae_lambda=1.0,
+    )
+
+    np.testing.assert_allclose(advantages, [1.0, 1.0])
+    np.testing.assert_allclose(returns, [1.0, 1.0])
+
+
 def test_checkpoint_round_trip_preserves_training_state_normalizer_and_rng(
     tmp_path: Path,
 ):
@@ -276,6 +293,20 @@ def test_checkpoint_round_trip_preserves_training_state_normalizer_and_rng(
     np.testing.assert_array_equal(
         restored_deterministic["movement"], expected_deterministic["movement"]
     )
+
+
+def test_protocol_1_1_ppo_checkpoint_is_rejected(tmp_path: Path):
+    agent = MixedActionPPO(2, _config(), seed=91)
+    checkpoint = tmp_path / "ppo-1.2.pt"
+    legacy = tmp_path / "ppo-1.1.pt"
+    agent.save_checkpoint(checkpoint)
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    payload["format_version"] = 2
+    payload["protocol_version"] = "1.1"
+    torch.save(payload, legacy)
+
+    with pytest.raises(ValueError, match="1.1"):
+        MixedActionPPO.load_checkpoint(legacy)
 
 
 def test_checkpoint_restores_partial_rollout(tmp_path: Path):

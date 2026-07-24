@@ -27,6 +27,7 @@ public class Task extends Cloudlet {
 	private int vmIndex;
 	private int datacenterId;
 	private ExecutionTarget executionTarget;
+	private int cloudRelayUavId = -1;
 	private boolean terminalSettlementNotified;
 
 	public Task(int _mobileDeviceId, int cloudletId, long cloudletLength, int pesNumber,
@@ -93,6 +94,17 @@ public class Task extends Cloudlet {
 
 	public ExecutionTarget getExecutionTarget() {
 		return executionTarget;
+	}
+
+	public void setCloudRelayUavId(int cloudRelayUavId) {
+		if (cloudRelayUavId < -1) {
+			throw new IllegalArgumentException("Cloud relay UAV ID cannot be below -1");
+		}
+		this.cloudRelayUavId = cloudRelayUavId;
+	}
+
+	public int getCloudRelayUavId() {
+		return cloudRelayUavId;
 	}
 
 	/**

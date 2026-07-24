@@ -21,6 +21,8 @@ import torch
 from torch import nn
 from torch.distributions import Categorical, Normal
 
+from .contract import PROTOCOL_VERSION
+
 
 __all__ = [
     "PPOConfig",
@@ -37,9 +39,9 @@ __all__ = [
 
 
 _OBSERVATION_KEYS = frozenset(
-    {"time", "task", "resources", "uavs", "action_mask"}
+    {"time", "delta_time", "task", "resources", "uavs", "action_mask"}
 )
-_CONTINUOUS_KEYS = ("time", "task", "resources", "uavs")
+_CONTINUOUS_KEYS = ("time", "delta_time", "task", "resources", "uavs")
 
 
 class InvalidActionMaskError(RuntimeError, ValueError):
@@ -318,6 +320,7 @@ def compute_gae(
     truncated: Sequence[bool] | np.ndarray,
     *,
     gamma: float = 0.99,
+    discounts: Sequence[float] | np.ndarray | None = None,
     gae_lambda: float = 0.95,
     bootstrap_truncated: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -351,6 +354,20 @@ def compute_gae(
     if np.logical_and(arrays[3], arrays[4]).any():
         raise ValueError("a transition cannot be both terminated and truncated")
 
+    discount_array = (
+        np.full(length, gamma, dtype=np.float64)
+        if discounts is None
+        else np.asarray(discounts, dtype=np.float64)
+    )
+    if discount_array.ndim != 1 or discount_array.shape[0] != length:
+        raise ValueError("discounts must be one-dimensional and match rewards")
+    if (
+        not np.isfinite(discount_array).all()
+        or (discount_array < 0.0).any()
+        or (discount_array > 1.0).any()
+    ):
+        raise ValueError("discounts must be finite and lie in [0, 1]")
+
     reward_array, value_array, next_value_array, terminated_array, truncated_array = arrays
     advantages = np.zeros(length, dtype=np.float64)
     carry = 0.0
@@ -360,13 +377,21 @@ def compute_gae(
         )
         delta = (
             reward_array[index]
-            + gamma * next_value_array[index] * float(can_bootstrap)
+            + discount_array[index]
+            * next_value_array[index]
+            * float(can_bootstrap)
             - value_array[index]
         )
         same_episode = not (
             bool(terminated_array[index]) or bool(truncated_array[index])
         )
-        carry = delta + gamma * gae_lambda * float(same_episode) * carry
+        carry = (
+            delta
+            + discount_array[index]
+            * gae_lambda
+            * float(same_episode)
+            * carry
+        )
         advantages[index] = carry
     returns = advantages + value_array
     return advantages.astype(np.float32), returns.astype(np.float32)
@@ -383,6 +408,7 @@ class RolloutBuffer:
         "log_probs",
         "values",
         "rewards",
+        "discounts",
         "next_values",
         "terminated",
         "truncated",
@@ -399,6 +425,7 @@ class RolloutBuffer:
         self.log_probs: list[float] = []
         self.values: list[float] = []
         self.rewards: list[float] = []
+        self.discounts: list[float] = []
         self.next_values: list[float] = []
         self.terminated: list[bool] = []
         self.truncated: list[bool] = []
@@ -416,15 +443,18 @@ class RolloutBuffer:
         log_prob: float,
         value: float,
         reward: float,
+        discount: float,
         next_value: float,
         terminated: bool,
         truncated: bool,
     ) -> None:
         if terminated and truncated:
             raise ValueError("a transition cannot be both terminated and truncated")
-        scalar_values = (log_prob, value, reward, next_value)
+        scalar_values = (log_prob, value, reward, discount, next_value)
         if not all(math.isfinite(float(item)) for item in scalar_values):
             raise ValueError("rollout scalar values must be finite")
+        if not 0.0 <= float(discount) <= 1.0:
+            raise ValueError("rollout discount must lie in [0, 1]")
         state_array = np.asarray(state, dtype=np.float32)
         mask_array = np.asarray(action_mask, dtype=np.bool_)
         movement_array = np.asarray(movement, dtype=np.float32)
@@ -448,6 +478,7 @@ class RolloutBuffer:
         self.log_probs.append(float(log_prob))
         self.values.append(float(value))
         self.rewards.append(float(reward))
+        self.discounts.append(float(discount))
         self.next_values.append(float(next_value))
         self.terminated.append(bool(terminated))
         self.truncated.append(bool(truncated))
@@ -462,6 +493,7 @@ class RolloutBuffer:
             self.terminated,
             self.truncated,
             gamma=config.gamma,
+            discounts=self.discounts,
             gae_lambda=config.gae_lambda,
             bootstrap_truncated=config.bootstrap_truncated,
         )
@@ -490,6 +522,7 @@ class RolloutBuffer:
                 log_prob=float(row["log_probs"]),
                 value=float(row["values"]),
                 reward=float(row["rewards"]),
+                discount=float(row["discounts"]),
                 next_value=float(row["next_values"]),
                 terminated=bool(row["terminated"]),
                 truncated=bool(row["truncated"]),
@@ -550,6 +583,7 @@ class MixedActionPPO:
     """PPO agent for ``Dict(target=Discrete, movement=Box)`` actions."""
 
     name = "mixed_action_ppo"
+    checkpoint_format_version = 3
 
     def __init__(
         self,
@@ -560,8 +594,8 @@ class MixedActionPPO:
         if number_of_uavs <= 0:
             raise ValueError("number_of_uavs must be positive")
         self.number_of_uavs = int(number_of_uavs)
-        self.target_count = 3 + self.number_of_uavs
-        self.observation_dim = 1 + 7 + 3 * 3 + self.number_of_uavs * 8
+        self.target_count = 2 + self.number_of_uavs
+        self.observation_dim = 2 + 7 + 2 * 3 + self.number_of_uavs * 8
         self.movement_dim = self.number_of_uavs * 3
         self.config = config if config is not None else PPOConfig()
         self.device = torch.device(self.config.device)
@@ -674,6 +708,7 @@ class MixedActionPPO:
         truncated: Sequence[bool] | np.ndarray,
         *,
         gamma: float = 0.99,
+        discounts: Sequence[float] | np.ndarray | None = None,
         gae_lambda: float = 0.95,
         bootstrap_truncated: bool = True,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -684,6 +719,7 @@ class MixedActionPPO:
             terminated,
             truncated,
             gamma=gamma,
+            discounts=discounts,
             gae_lambda=gae_lambda,
             bootstrap_truncated=bootstrap_truncated,
         )
@@ -704,8 +740,9 @@ class MixedActionPPO:
 
         expected_shapes = {
             "time": (1,),
+            "delta_time": (1,),
             "task": (7,),
-            "resources": (3, 3),
+            "resources": (2, 3),
             "uavs": (self.number_of_uavs, 8),
             "action_mask": (self.target_count,),
         }
@@ -893,6 +930,7 @@ class MixedActionPPO:
         next_observation: Mapping[str, np.ndarray],
         terminated: bool,
         truncated: bool,
+        discount: float | None = None,
     ) -> None:
         if terminated and truncated:
             raise ValueError("a transition cannot be both terminated and truncated")
@@ -922,6 +960,7 @@ class MixedActionPPO:
             log_prob=float(sample.log_prob),
             value=float(sample.value),
             reward=float(reward),
+            discount=self.config.gamma if discount is None else float(discount),
             next_value=next_value,
             terminated=bool(terminated),
             truncated=bool(truncated),
@@ -1064,7 +1103,9 @@ class MixedActionPPO:
         optimizer_state = self.optimizer.state_dict()
         rng_state = self._rng_state()
         checkpoint = {
-            "format_version": 2,
+            "format_version": self.checkpoint_format_version,
+            "algorithm": self.name,
+            "protocol_version": PROTOCOL_VERSION,
             "number_of_uavs": self.number_of_uavs,
             "config": asdict(self.config),
             "actor_state_dict": actor_state,
@@ -1108,8 +1149,15 @@ class MixedActionPPO:
         if not isinstance(checkpoint, Mapping):
             raise ValueError("invalid PPO checkpoint")
         format_version = int(checkpoint.get("format_version", 1))
-        if format_version not in {1, 2}:
-            raise ValueError("unsupported PPO checkpoint format")
+        if (
+            format_version != cls.checkpoint_format_version
+            or checkpoint.get("algorithm") != cls.name
+            or checkpoint.get("protocol_version") != PROTOCOL_VERSION
+        ):
+            raise ValueError(
+                "unsupported PPO checkpoint format; GymBridge 1.1 "
+                "checkpoints are intentionally incompatible with protocol 1.2"
+            )
 
         config = PPOConfig(**dict(checkpoint["config"]))
         agent = cls(
@@ -1137,28 +1185,22 @@ class MixedActionPPO:
         agent.optimizer.load_state_dict(optimizer_state)
         agent.training_steps = int(checkpoint["training_steps"])
         agent.update_count = int(checkpoint["update_count"])
-        if format_version >= 2:
-            raw_training_seed_start = checkpoint.get("training_seed_start")
-            agent.training_seed_start = (
-                None
-                if raw_training_seed_start is None
-                else int(raw_training_seed_start)
-            )
-            agent.training_episode_count = int(
-                checkpoint.get("training_episode_count", 0)
-            )
-            if agent.training_episode_count < 0:
-                raise ValueError("invalid training episode count in checkpoint")
-            if (
-                agent.training_seed_start is None
-                and agent.training_episode_count != 0
-            ):
-                raise ValueError("checkpoint has a seed cursor without a seed start")
-        elif agent.training_steps > 0:
-            # Old train_ppo reset the policy RNG to each episode seed, leaving
-            # ``seed`` equal to the last used environment seed.  Defer mapping
-            # this cursor to the caller's original seed start until resume.
-            agent._legacy_next_training_seed = int(checkpoint["seed"]) + 1
+        raw_training_seed_start = checkpoint.get("training_seed_start")
+        agent.training_seed_start = (
+            None
+            if raw_training_seed_start is None
+            else int(raw_training_seed_start)
+        )
+        agent.training_episode_count = int(
+            checkpoint.get("training_episode_count", 0)
+        )
+        if agent.training_episode_count < 0:
+            raise ValueError("invalid training episode count in checkpoint")
+        if (
+            agent.training_seed_start is None
+            and agent.training_episode_count != 0
+        ):
+            raise ValueError("checkpoint has a seed cursor without a seed start")
         agent.observation_normalizer.load_state_dict(
             checkpoint["observation_normalizer"]
         )

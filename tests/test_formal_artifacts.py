@@ -10,6 +10,7 @@ from PIL import Image
 from scripts.package_experiment_artifacts import DEFAULT_ROOT
 from scripts.plot_formal_results import DEFAULT_SUMMARY, create_figures
 from scripts import run_formal_experiments
+from scripts import run_pilot_audit
 from scripts.run_formal_experiments import (
     _evaluation_is_complete,
     _sha256,
@@ -35,19 +36,40 @@ def test_metric_value_preserves_physical_units_and_normalizes_per_settled_task()
         "total_reward": 12.5,
         "successful_tasks": 3,
         "settled_tasks": 4,
+        "deadline_success_rate": 0.75,
+        "latency_p95_seconds": 3.5,
+        "simulation_time": 10.0,
         "physical_metric_sums": {
             "latency_seconds": 8.0,
             "ue_energy_joules": 4.0,
             "uav_energy_joules": 12.0,
             "constraint_violations": 2.0,
         },
+        "audit_metric_means": {
+            "uav_queue_length_total": 1.5,
+            "local_resource_utilization": 0.1,
+            "cloud_resource_utilization": 0.2,
+            "uav_resource_utilization": 0.3,
+        },
+        "audit_metric_maxima": {"uav_queue_length_max": 4.0},
+        "target_ratios": {
+            "local": 0.25,
+            "cloud": 0.25,
+            "uav": 0.5,
+            "offloaded": 0.75,
+        },
     }
 
     assert metric_value(row, "total_reward") == 12.5
-    assert metric_value(row, "success_rate") == 0.75
+    assert metric_value(row, "deadline_success_rate") == 0.75
     assert metric_value(row, "latency_per_settled_task_seconds") == 2.0
+    assert metric_value(row, "latency_p95_seconds") == 3.5
     assert metric_value(row, "energy_per_settled_task_joules") == 4.0
     assert metric_value(row, "constraint_violations") == 2.0
+    assert metric_value(row, "average_uav_queue_length") == 1.5
+    assert metric_value(row, "max_uav_queue_length") == 4.0
+    assert metric_value(row, "uav_resource_utilization") == 0.3
+    assert metric_value(row, "offload_ratio") == 0.75
 
 
 def _stats(values):
@@ -67,13 +89,19 @@ def _stats(values):
 def _synthetic_summary():
     metrics = (
         "total_reward",
-        "success_rate",
+        "deadline_success_rate",
         "latency_per_settled_task_seconds",
+        "latency_p95_seconds",
         "energy_per_settled_task_joules",
         "constraint_violations",
     )
     algorithms = ("mixed_action_ppo", "mixed_action_td3")
-    baselines = ("minimum_estimated_delay", "random_masked")
+    baselines = (
+        "minimum_estimated_delay",
+        "random_masked",
+        "local_only",
+        "cloud_only",
+    )
     payload = {
         "audit": {"status": "passed"},
         "training_curves": {},
@@ -132,9 +160,11 @@ def test_plotter_emits_vector_and_300_dpi_raster_figures(tmp_path: Path):
 
 def test_formal_config_rejects_fewer_than_ten_training_seeds():
     config = {
-        "format_version": 1,
-        "protocol_version": "1.1",
+        "format_version": 2,
+        "protocol_version": "1.2",
         "interaction_budget": 4096,
+        "bootstrap_resamples": 20000,
+        "primary_metric": "deadline_success_rate",
         "algorithms": {
             "mixed_action_td3": {
                 "command": "train-td3",
@@ -164,6 +194,51 @@ def test_publication_helpers_follow_the_configured_output_root():
     assert DEFAULT_SUMMARY == expected / "summary/formal_summary.json"
 
 
+def test_protocol_1_2_freezes_scale_budget_and_dqn_ablation_role():
+    config = json.loads(
+        run_formal_experiments.DEFAULT_CONFIG.read_text(encoding="utf-8")
+    )
+
+    assert config["protocol_version"] == "1.2"
+    assert config["number_of_uavs"] == 2
+    assert config["mobile_devices"] == {
+        "training_validation": 25,
+        "heldout": 15,
+    }
+    assert config["interaction_budget"] == 200_000
+    assert config["bootstrap_resamples"] == 20_000
+    assert config["primary_metric"] == "deadline_success_rate"
+    assert set(config["algorithms"]) == {
+        "masked_parameterized_action_ddpg",
+        "mixed_action_ppo",
+        "mixed_action_td3",
+        "masked_dqn_zero_movement",
+    }
+    training_seed_schedules = {
+        tuple(specification["training_seed_starts"])
+        for specification in config["algorithms"].values()
+    }
+    assert len(training_seed_schedules) == 1
+    assert (
+        config["algorithms"]["masked_dqn_zero_movement"]["comparison_role"]
+        == "action_capability_ablation"
+    )
+    _validate_config(config)
+
+
+def test_pilot_config_covers_four_algorithms_and_frozen_acceptance_limit():
+    config = json.loads(
+        run_pilot_audit.DEFAULT_CONFIG.read_text(encoding="utf-8")
+    )
+
+    run_pilot_audit._validate_config(config)
+    assert config["number_of_uavs"] == 1
+    assert config["mobile_devices"] == 20
+    assert config["interaction_budget"] == 512
+    assert set(config["algorithms"]) == run_pilot_audit.EXPECTED_ALGORITHMS
+    assert config["exponential_saturation_rate_limit"] == 0.015
+
+
 def test_dry_run_preserves_completed_orchestration_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -174,11 +249,14 @@ def test_dry_run_preserves_completed_orchestration_manifest(
     original = b'{"status":"complete","sentinel":true}\n'
     manifest.write_bytes(original)
     config = {
-        "format_version": 1,
+        "format_version": 2,
         "experiment_id": "dry_run_regression",
-        "protocol_version": "1.1",
+        "protocol_version": "1.2",
         "number_of_uavs": 2,
+        "mobile_devices": {"training_validation": 2, "heldout": 2},
         "interaction_budget": 1024,
+        "bootstrap_resamples": 20000,
+        "primary_metric": "deadline_success_rate",
         "output_root": str(output_root),
         "ports": {"training_validation": 12470, "heldout": 12471},
         "environments": {

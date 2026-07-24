@@ -41,8 +41,10 @@ public class GymDecisionCoordinator {
     private int successfulTaskCount;
     private double lastSimulationTime;
     private double lastMovementDecisionTime;
+    private double lastStepObservationTime;
     private double lastReportedUavEnergy;
     private int lastReportedBoundaryConstraints;
+    private int lastSelectedCloudRelayUavId = -1;
 
     public GymDecisionCoordinator(SimManager manager) {
         this.manager = manager;
@@ -87,6 +89,7 @@ public class GymDecisionCoordinator {
             throw new IllegalStateException(
                     "Gym episode ended before the first task-arrival decision");
         }
+        lastStepObservationTime = CloudSim.clock();
         return buildObservation();
     }
 
@@ -100,6 +103,7 @@ public class GymDecisionCoordinator {
         }
         boolean constraintViolation = mask[targetIndex] == 0;
         ExecutionTarget target = mapTarget(targetIndex);
+        lastSelectedCloudRelayUavId = -1;
         double decisionTime = CloudSim.clock();
         double movementElapsedSeconds = Math.max(
                 0.0, decisionTime - lastMovementDecisionTime);
@@ -137,6 +141,9 @@ public class GymDecisionCoordinator {
                     task.getMobileDeviceId(), legacyTarget, task);
             decision.ueEnergyJoules = Math.max(0.0, uploadDelay) * 0.1;
         }
+        if (decision.target.getType() == ExecutionTarget.Type.CLOUD) {
+            lastSelectedCloudRelayUavId = task.getCloudRelayUavId();
+        }
         Decision previous = inFlightDecisions.put(task.getCloudletId(), decision);
         if (previous != null) {
             throw new IllegalStateException(
@@ -159,7 +166,9 @@ public class GymDecisionCoordinator {
     private void settle(Decision decision, boolean success, boolean allowNaturalTermination) {
         lastSimulationTime = Math.max(lastSimulationTime, CloudSim.clock());
         double latencySeconds = Math.max(0.0, CloudSim.clock() - decision.decisionTime);
-        double successComponent = success ? 1.0 : 0.0;
+        boolean deadlineSuccess = success
+                && latencySeconds <= decision.deadlineSeconds;
+        double successComponent = deadlineSuccess ? 1.0 : 0.0;
         double latencyRatio = latencySeconds / decision.deadlineSeconds;
         double ueEnergyRatio = decision.ueEnergyJoules / 10.0;
         transition.add(
@@ -171,7 +180,7 @@ public class GymDecisionCoordinator {
                 decision.ueEnergyJoules,
                 decision.constraintViolation ? 1 : 0);
         settledTaskCount++;
-        if (success) {
+        if (deadlineSuccess) {
             successfulTaskCount++;
         }
 
@@ -241,20 +250,64 @@ public class GymDecisionCoordinator {
         TransitionSnapshot snapshot = transition.drain(
                 intervalUavEnergy, uavBudget, intervalBoundaryConstraints);
         JSONObject metrics = snapshot.physicalMetrics;
+        double simulationTime = Math.max(lastSimulationTime, CloudSim.clock());
+        double elapsedSimulationTime = Math.max(
+                0.0, simulationTime - lastStepObservationTime);
+        lastStepObservationTime = simulationTime;
+        SimSettings settings = manager.getSimulationSettings();
+        double discountTimeUnit = Math.max(
+                Double.MIN_NORMAL, settings.getSmdpDiscountTimeUnitSeconds());
+        double effectiveDiscount = Math.pow(
+                settings.getSmdpDiscountBase(),
+                elapsedSimulationTime / discountTimeUnit);
         metrics = withEpisodeProgress(metrics, settledTaskCount, totalTaskCount,
-                Math.max(lastSimulationTime, CloudSim.clock()));
+                simulationTime);
         int awaitingDecision = currentTask == null ? 0 : 1;
         int inFlight = inFlightDecisions.size();
         int unsettled = Math.max(0, totalTaskCount - settledTaskCount);
         int notArrived = Math.max(0,
                 totalTaskCount - settledTaskCount - inFlight - awaitingDecision);
         metrics.put("successful_tasks", successfulTaskCount)
+                .put("throughput_tasks_per_second", simulationTime <= 0.0
+                        ? 0.0 : successfulTaskCount / simulationTime)
                 .put("failed_tasks", settledTaskCount - successfulTaskCount)
                 .put("settled_in_transition", snapshot.settledCount)
                 .put("in_flight_tasks", inFlight)
                 .put("awaiting_decision_tasks", awaitingDecision)
                 .put("not_arrived_tasks", notArrived)
-                .put("unsettled_tasks", unsettled);
+                .put("unsettled_tasks", unsettled)
+                .put("elapsed_simulation_time", elapsedSimulationTime)
+                .put("effective_discount", effectiveDiscount)
+                .put("selected_cloud_relay_uav", lastSelectedCloudRelayUavId)
+                .put("uav_queue_length_total",
+                        manager.getUAVManager().getUAVs().stream()
+                                .mapToInt(UAV::getTaskQueueLength).sum())
+                .put("uav_queue_length_max",
+                        manager.getUAVManager().getUAVs().stream()
+                                .mapToInt(UAV::getTaskQueueLength).max().orElse(0))
+                .put("local_resource_utilization", averageLocalUtilization())
+                .put("cloud_resource_utilization",
+                        averageVmUtilization(resourceVms(
+                                ExecutionTarget.cloud(), 0)))
+                .put("uav_resource_utilization", averageUavUtilization());
+        if (manager.getNetworkModel() instanceof UAVMECNetworkModel) {
+            UAVMECNetworkModel network =
+                    (UAVMECNetworkModel) manager.getNetworkModel();
+            metrics.put("active_access_uploads",
+                    network.getActiveAccessUploadCount())
+                    .put("active_access_downloads",
+                            network.getActiveAccessDownloadCount())
+                    .put("active_backhaul_uploads",
+                            network.getActiveBackhaulUploadCount())
+                    .put("active_backhaul_downloads",
+                            network.getActiveBackhaulDownloadCount())
+                    .put("access_channel_count",
+                            settings.getUAVAccessChannelCount())
+                    .put("access_bandwidth_mbps",
+                            settings.getUAVAccessBandwidthMbps())
+                    .put("backhaul_bandwidth_mbps",
+                            settings.getUAVCloudBandwidthMbps());
+        }
         StepResult result = new StepResult(
                 buildObservation(), snapshot.rewardComponents, snapshot.reward,
                 snapshot.settledCount, terminated, truncated, metrics);
@@ -308,11 +361,13 @@ public class GymDecisionCoordinator {
                 currentTask.getMobileDeviceId(), CloudSim.clock());
         double[][] table = settings.getTaskLookUpTable();
         double deadline = deadlineSeconds(currentTask);
+        double deltaTime = Math.max(
+                0.0, CloudSim.clock() - lastMovementDecisionTime);
 
         JSONArray task = new JSONArray()
-                .put(normalize(currentTask.getInputFileSize(), maxColumn(table, 5)))
-                .put(normalize(currentTask.getOutputFileSize(), maxColumn(table, 6)))
-                .put(normalize(currentTask.getLength(), maxColumn(table, 7)))
+                .put(normalize(currentTask.getInputFileSize(), exponentialQ99Scale(table, 5)))
+                .put(normalize(currentTask.getOutputFileSize(), exponentialQ99Scale(table, 6)))
+                .put(normalize(currentTask.getLength(), exponentialQ99Scale(table, 7)))
                 .put(normalize(currentTask.getPesNumber(), maxColumn(table, 8)))
                 .put(normalize(deadline, maxColumn(table, 13)))
                 .put(normalize(user.getXPos(), settings.getSimulationSpace()[0]))
@@ -320,24 +375,38 @@ public class GymDecisionCoordinator {
 
         ResourceSnapshot local = resourceSnapshot(ExecutionTarget.local(), currentTask);
         ResourceSnapshot cloud = resourceSnapshot(ExecutionTarget.cloud(), currentTask);
-        ResourceSnapshot edge = resourceSnapshot(ExecutionTarget.edge(), currentTask);
         JSONArray resources = new JSONArray()
                 .put(local.toJson())
-                .put(cloud.toJson())
-                .put(edge.toJson());
+                .put(cloud.toJson());
 
         JSONArray uavs = new JSONArray();
+        int activeUploads = 1;
+        int activeDownloads = 1;
+        if (manager.getNetworkModel() instanceof UAVMECNetworkModel) {
+            UAVMECNetworkModel network =
+                    (UAVMECNetworkModel) manager.getNetworkModel();
+            activeUploads += network.getActiveAccessUploadCount();
+            activeDownloads += network.getActiveAccessDownloadCount();
+        }
         for (UAV uav : manager.getUAVManager().getUAVs()) {
             double[] position = uav.getPosition();
-            double upload = UAVMECNetworkModel.calculateAirGroundTransferDelay(
-                    currentTask.getInputFileSize(), settings.getWlanBandwidth(),
-                    settings.getInternalLanDelay(), settings.getUAVPathLossParameter(),
-                    settings.getUAVPathLossExponent(), settings.getUAVAdditionalPathLoss(),
+            double upload = UAVMECNetworkModel.calculateProbabilisticAirGroundTransferDelay(
+                    currentTask.getInputFileSize(), settings.getUAVAccessBandwidthMbps(),
+                    settings.getInternalLanDelay(), settings.getUAVCarrierFrequencyHz(),
+                    settings.getUAVLoSA(), settings.getUAVLoSB(),
+                    settings.getUAVEtaLoSDb(), settings.getUAVEtaNLoSDb(),
+                    settings.getUAVTransmitPowerWatts(),
+                    settings.getUAVNoisePsdDbmPerHz(),
+                    settings.getUAVAccessChannelCount(), activeUploads,
                     user, position);
-            double download = UAVMECNetworkModel.calculateAirGroundTransferDelay(
-                    currentTask.getOutputFileSize(), settings.getWlanBandwidth(),
-                    settings.getInternalLanDelay(), settings.getUAVPathLossParameter(),
-                    settings.getUAVPathLossExponent(), settings.getUAVAdditionalPathLoss(),
+            double download = UAVMECNetworkModel.calculateProbabilisticAirGroundTransferDelay(
+                    currentTask.getOutputFileSize(), settings.getUAVAccessBandwidthMbps(),
+                    settings.getInternalLanDelay(), settings.getUAVCarrierFrequencyHz(),
+                    settings.getUAVLoSA(), settings.getUAVLoSB(),
+                    settings.getUAVEtaLoSDb(), settings.getUAVEtaNLoSDb(),
+                    settings.getUAVTransmitPowerWatts(),
+                    settings.getUAVNoisePsdDbmPerHz(),
+                    settings.getUAVAccessChannelCount(), activeDownloads,
                     user, position);
             uavs.put(new JSONArray()
                     .put(normalize(position[0], settings.getSimulationSpace()[0]))
@@ -356,6 +425,8 @@ public class GymDecisionCoordinator {
         }
         return new JSONObject()
                 .put("time", new JSONArray().put(normalize(CloudSim.clock(), settings.getSimulationTime())))
+                .put("delta_time", new JSONArray().put(
+                        normalize(deltaTime, settings.getSimulationTime())))
                 .put("task", task)
                 .put("resources", resources)
                 .put("uavs", uavs)
@@ -363,12 +434,11 @@ public class GymDecisionCoordinator {
     }
 
     private int[] buildActionMask(TaskProperty task) {
-        int[] mask = new int[3 + manager.getUAVManager().getUAVs().size()];
+        int[] mask = new int[2 + manager.getUAVManager().getUAVs().size()];
         mask[0] = resourceSnapshot(ExecutionTarget.local(), task).available ? 1 : 0;
         mask[1] = resourceSnapshot(ExecutionTarget.cloud(), task).available ? 1 : 0;
-        mask[2] = resourceSnapshot(ExecutionTarget.edge(), task).available ? 1 : 0;
         for (UAV uav : manager.getUAVManager().getUAVs()) {
-            mask[3 + uav.getId()] = uav.getEnergy() > 0 && uav.getTaskQueueLength() < 50 ? 1 : 0;
+            mask[2 + uav.getId()] = uav.getEnergy() > 0 && uav.getTaskQueueLength() < 50 ? 1 : 0;
         }
         return mask;
     }
@@ -376,8 +446,7 @@ public class GymDecisionCoordinator {
     private ExecutionTarget mapTarget(int targetIndex) {
         if (targetIndex == 0) return ExecutionTarget.local();
         if (targetIndex == 1) return ExecutionTarget.cloud();
-        if (targetIndex == 2) return ExecutionTarget.edge();
-        int uavId = targetIndex - 3;
+        int uavId = targetIndex - 2;
         if (uavId < 0 || uavId >= manager.getUAVManager().getUAVs().size()) {
             throw new IllegalArgumentException("Unknown Gym execution target: " + targetIndex);
         }
@@ -422,8 +491,11 @@ public class GymDecisionCoordinator {
         double loadRatio = totalCapacity <= 0.0
                 ? 0.0 : 1.0 - capacityRatio;
         double linkDelay = normalizedFixedResourceDelay(target, task);
+        boolean relayAvailable = target.getType() != ExecutionTarget.Type.CLOUD
+                || manager.getUAVManager().getUAVs().stream()
+                        .anyMatch(uav -> uav.getEnergy() > 0.0);
         return new ResourceSnapshot(
-                eligible && capacityRatio > 0.0,
+                eligible && capacityRatio > 0.0 && relayAvailable,
                 normalize(capacityRatio, 1.0),
                 normalize(loadRatio, 1.0),
                 linkDelay);
@@ -464,13 +536,113 @@ public class GymDecisionCoordinator {
         }
         SimSettings settings = manager.getSimulationSettings();
         boolean cloud = target.getType() == ExecutionTarget.Type.CLOUD;
-        double bandwidth = cloud
-                ? settings.getWanBandwidth() : settings.getWlanBandwidth();
-        double propagation = cloud
-                ? settings.getWanPropagationDelay() : settings.getInternalLanDelay();
+        if (cloud) {
+            return normalize(cloudTwoHopTransferDelay(task), deadlineSeconds(task));
+        }
+        double bandwidth = settings.getWlanBandwidth();
+        double propagation = settings.getInternalLanDelay();
         double transfer = fixedTransferDelay(task.getInputFileSize(), bandwidth, propagation)
                 + fixedTransferDelay(task.getOutputFileSize(), bandwidth, propagation);
         return normalize(transfer, deadlineSeconds(task));
+    }
+
+    private double cloudTwoHopTransferDelay(TaskProperty task) {
+        SimSettings settings = manager.getSimulationSettings();
+        Location user = manager.getMobilityModel().getLocation(
+                task.getMobileDeviceId(), CloudSim.clock());
+        double best = Double.POSITIVE_INFINITY;
+        int concurrentUploads = 1;
+        int concurrentDownloads = 1;
+        int concurrentBackhaulUploads = 1;
+        int concurrentBackhaulDownloads = 1;
+        if (manager.getNetworkModel() instanceof UAVMECNetworkModel) {
+            UAVMECNetworkModel network =
+                    (UAVMECNetworkModel) manager.getNetworkModel();
+            concurrentUploads += network.getActiveAccessUploadCount();
+            concurrentDownloads += network.getActiveAccessDownloadCount();
+            concurrentBackhaulUploads += network.getActiveBackhaulUploadCount();
+            concurrentBackhaulDownloads += network.getActiveBackhaulDownloadCount();
+        }
+        for (UAV uav : manager.getUAVManager().getUAVs()) {
+            if (uav.getEnergy() <= 0.0) {
+                continue;
+            }
+            double access = UAVMECNetworkModel.calculateProbabilisticAirGroundTransferDelay(
+                    task.getInputFileSize(), settings.getUAVAccessBandwidthMbps(),
+                    settings.getInternalLanDelay(), settings.getUAVCarrierFrequencyHz(),
+                    settings.getUAVLoSA(), settings.getUAVLoSB(),
+                    settings.getUAVEtaLoSDb(), settings.getUAVEtaNLoSDb(),
+                    settings.getUAVTransmitPowerWatts(),
+                    settings.getUAVNoisePsdDbmPerHz(),
+                    settings.getUAVAccessChannelCount(), concurrentUploads,
+                    user, uav.getPosition());
+            access += UAVMECNetworkModel.calculateProbabilisticAirGroundTransferDelay(
+                    task.getOutputFileSize(), settings.getUAVAccessBandwidthMbps(),
+                    settings.getInternalLanDelay(), settings.getUAVCarrierFrequencyHz(),
+                    settings.getUAVLoSA(), settings.getUAVLoSB(),
+                    settings.getUAVEtaLoSDb(), settings.getUAVEtaNLoSDb(),
+                    settings.getUAVTransmitPowerWatts(),
+                    settings.getUAVNoisePsdDbmPerHz(),
+                    settings.getUAVAccessChannelCount(), concurrentDownloads,
+                    user, uav.getPosition());
+            best = Math.min(best, access);
+        }
+        if (!Double.isFinite(best)) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double backhaulPropagation = settings.getUAVCloudPropagationDelay()
+                + settings.getUAVCloudDistanceMeters() / 299_792_458.0;
+        return best
+                + fixedTransferDelay(task.getInputFileSize(),
+                        settings.getUAVCloudBandwidthMbps()
+                                / concurrentBackhaulUploads,
+                        backhaulPropagation)
+                + fixedTransferDelay(task.getOutputFileSize(),
+                        settings.getUAVCloudBandwidthMbps()
+                                / concurrentBackhaulDownloads,
+                        backhaulPropagation);
+    }
+
+    private double averageLocalUtilization() {
+        List<Vm> vms = new ArrayList<>();
+        for (int device = 0; device < manager.getNumOfMobileDevice(); device++) {
+            List<? extends Vm> deviceVms =
+                    manager.getMobileServerManager().getVmList(device);
+            if (deviceVms != null) {
+                vms.addAll(deviceVms);
+            }
+        }
+        return averageVmUtilization(vms);
+    }
+
+    private double averageVmUtilization(List<? extends Vm> vms) {
+        double total = 0.0;
+        int count = 0;
+        for (Vm vm : vms) {
+            if (vm == null || vm.getCloudletScheduler() == null) {
+                continue;
+            }
+            total += normalizeUtilization(
+                    vm.getCloudletScheduler().getTotalUtilizationOfCpu(
+                            CloudSim.clock()));
+            count++;
+        }
+        return count == 0 ? 0.0 : total / count;
+    }
+
+    private double averageUavUtilization() {
+        if (manager.getUAVManager().getUAVs().isEmpty()) {
+            return 0.0;
+        }
+        return manager.getUAVManager().getUAVs().stream()
+                .mapToDouble(uav -> {
+                    double capacity = Math.max(
+                            Double.MIN_NORMAL, uav.getProcessingCapacity());
+                    return Math.max(0.0, Math.min(1.0,
+                            1.0 - uav.getAvailableCapacity() / capacity));
+                })
+                .average()
+                .orElse(0.0);
     }
 
     private static double fixedTransferDelay(
@@ -496,10 +668,11 @@ public class GymDecisionCoordinator {
         }
         return new JSONObject()
                 .put("time", new JSONArray().put(1.0))
+                .put("delta_time", new JSONArray().put(0.0))
                 .put("task", zeroArray(7))
-                .put("resources", new JSONArray().put(zeroArray(3)).put(zeroArray(3)).put(zeroArray(3)))
+                .put("resources", new JSONArray().put(zeroArray(3)).put(zeroArray(3)))
                 .put("uavs", uavs)
-                .put("action_mask", zeroArray(3 + uavCount));
+                .put("action_mask", zeroArray(2 + uavCount));
     }
 
     private JSONArray zeroArray(int size) {
@@ -536,6 +709,20 @@ public class GymDecisionCoordinator {
         double max = 1.0;
         for (double[] row : table) {
             if (row.length > column) max = Math.max(max, row[column]);
+        }
+        return max;
+    }
+
+    static double exponentialQ99Scale(double[][] table, int column) {
+        return -Math.log(0.01) * maxColumnValue(table, column);
+    }
+
+    private static double maxColumnValue(double[][] table, int column) {
+        double max = 1.0;
+        for (double[] row : table) {
+            if (row.length > column) {
+                max = Math.max(max, row[column]);
+            }
         }
         return max;
     }
@@ -606,6 +793,7 @@ public class GymDecisionCoordinator {
         private double reward;
         private int settledCount;
         private int constraintViolations;
+        private final List<Double> latencySamplesSeconds = new ArrayList<>();
 
         private void add(double taskSuccess, double taskLatencyRatio,
                 double taskUeEnergyRatio, double taskLatencySeconds,
@@ -617,6 +805,7 @@ public class GymDecisionCoordinator {
             latencySeconds += taskLatencySeconds;
             deadlineSeconds += taskDeadlineSeconds;
             ueEnergyJoules += taskUeEnergyJoules;
+            latencySamplesSeconds.add(Math.max(0.0, taskLatencySeconds));
             constraintViolations += Math.max(0, taskConstraintViolations);
             reward += boundedTaskReward(taskSuccess, taskLatencyRatio, taskUeEnergyRatio);
             settledCount++;
@@ -644,6 +833,11 @@ public class GymDecisionCoordinator {
             JSONObject physical = rawPhysicalMetrics(
                     latencySeconds, deadlineSeconds, ueEnergyJoules,
                     intervalUavEnergyJoules, totalConstraintViolations);
+            JSONArray latencySamples = new JSONArray();
+            for (double latency : latencySamplesSeconds) {
+                latencySamples.put(latency);
+            }
+            physical.put("settled_task_latencies_seconds", latencySamples);
             double intervalReward = reward
                     - 0.20 * Math.min(Math.max(uavEnergyRatio, 0.0), 2.0)
                     - 0.30 * Math.min(Math.max(boundedConstraintViolations, 0.0), 1.0);
@@ -658,6 +852,7 @@ public class GymDecisionCoordinator {
             reward = 0.0;
             settledCount = 0;
             constraintViolations = 0;
+            latencySamplesSeconds.clear();
             return snapshot;
         }
     }

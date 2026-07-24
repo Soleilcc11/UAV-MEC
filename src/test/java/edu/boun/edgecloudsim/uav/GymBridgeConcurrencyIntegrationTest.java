@@ -17,6 +17,8 @@ import edu.boun.edgecloudsim.core.SimManager;
 import edu.boun.edgecloudsim.core.SimSettings;
 import edu.boun.edgecloudsim.task_generator.LoadGeneratorModel;
 import edu.boun.edgecloudsim.utils.TaskProperty;
+import edu.boun.edgecloudsim.edge_client.mobile_processing_unit.DefaultMobileServerManager;
+import edu.boun.edgecloudsim.edge_client.mobile_processing_unit.MobileServerManager;
 
 class GymBridgeConcurrencyIntegrationTest {
     @Test
@@ -65,16 +67,13 @@ class GymBridgeConcurrencyIntegrationTest {
             JSONObject initial = coordinator.awaitInitialObservation(5_000);
             assertEquals(1.0 / 60.0,
                     initial.getJSONArray("time").getDouble(0), 1e-12);
-            assertEquals(0, initial.getJSONArray("action_mask").getInt(0));
+            assertEquals(1, initial.getJSONArray("action_mask").getInt(0));
             assertEquals(1, initial.getJSONArray("action_mask").getInt(1));
             assertEquals(1, initial.getJSONArray("action_mask").getInt(2));
-            assertEquals(0.0,
-                    initial.getJSONArray("resources").getJSONArray(0).getDouble(0),
-                    1e-12);
+            assertTrue(initial.getJSONArray("resources").getJSONArray(0).getDouble(0) > 0.0);
             assertTrue(initial.getJSONArray("resources").getJSONArray(1).getDouble(0) > 0.0);
-            assertTrue(initial.getJSONArray("resources").getJSONArray(2).getDouble(0) > 0.0);
             assertTrue(initial.getJSONArray("resources").getJSONArray(1).getDouble(2)
-                    > initial.getJSONArray("resources").getJSONArray(2).getDouble(2));
+                    > initial.getJSONArray("uavs").getJSONArray(0).getDouble(6));
 
             coordinator.beginDecision(2, zeroMovements(settings.getNumOfUAVs()));
             GymDecisionCoordinator.StepResult first =
@@ -135,6 +134,11 @@ class GymBridgeConcurrencyIntegrationTest {
         CloudSim.init(1, Calendar.getInstance(), false);
         UAVMECScenarioFactory factory = new UAVMECScenarioFactory(
                 1, "SINGLE_TIER", "RANDOM_FIT") {
+            @Override
+            public MobileServerManager getMobileServerManager() {
+                return new DefaultMobileServerManager();
+            }
+
             @Override
             public LoadGeneratorModel getLoadGeneratorModel() {
                 return new LoadGeneratorModel(1, 60, "SINGLE_TIER") {

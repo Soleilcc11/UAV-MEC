@@ -29,7 +29,7 @@ class DeterministicContractBackend:
             latency_ratio=0.5,
             ue_energy_ratio=0.1,
             uav_energy_ratio=float(np.linalg.norm(movement)) / 10.0,
-            constraint_violations=0.0 if target < 3 + self.number_of_uavs else 1.0,
+            constraint_violations=0.0 if target < 2 + self.number_of_uavs else 1.0,
         )
         return BackendStep(
             observation=self._observation(),
@@ -44,11 +44,12 @@ class DeterministicContractBackend:
         pass
 
     def _observation(self):
-        target_count = 3 + self.number_of_uavs
+        target_count = 2 + self.number_of_uavs
         return {
             "time": np.array([min(self.step_count / 2.0, 1.0)], dtype=np.float32),
+            "delta_time": np.array([0.5], dtype=np.float32),
             "task": np.full(7, 0.25, dtype=np.float32),
-            "resources": np.full((3, 3), 0.5, dtype=np.float32),
+            "resources": np.full((2, 3), 0.5, dtype=np.float32),
             "uavs": np.full((self.number_of_uavs, 8), 0.5, dtype=np.float32),
             "action_mask": np.ones(target_count, dtype=np.int8),
         }
@@ -57,6 +58,13 @@ class DeterministicContractBackend:
 def test_contract_passes_gymnasium_checker():
     env = UAVMECGymEnv(2, DeterministicContractBackend(2))
     check_env(env)
+    observation, _ = env.reset(seed=42)
+    continuous_count = sum(
+        int(np.asarray(observation[key]).size)
+        for key in ("time", "delta_time", "task", "resources", "uavs")
+    )
+    assert continuous_count == 31
+    assert observation["action_mask"].shape == (4,)
 
 
 def test_reward_is_bounded_and_penalizes_costs():

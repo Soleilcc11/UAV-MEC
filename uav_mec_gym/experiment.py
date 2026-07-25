@@ -567,7 +567,10 @@ def audit_episode_results(results: Iterable[EpisodeResult]) -> None:
             maximum = float(result.audit_metric_maxima[key])
             if not np.isfinite(mean) or not np.isfinite(maximum):
                 raise ValueError(f"Non-finite episode audit metric {key}")
-            if mean < 0.0 or maximum < mean:
+            if mean < 0.0 or (
+                maximum < mean
+                and not np.isclose(maximum, mean, rtol=1e-12, atol=1e-15)
+            ):
                 raise ValueError(f"Inconsistent episode audit metric {key}")
             if key.endswith("_utilization") and maximum > 1.0:
                 raise ValueError(f"Resource utilization exceeds one: {key}")

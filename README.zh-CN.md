@@ -123,7 +123,7 @@ Pilot 使用同一个训练种子依次运行 4 个算法，每个算法进行 5
 以下任一情况会使审计失败：出现 NaN/Inf；任务数、吞吐量与仿真时钟不一致；
 时延样本不完整；Git、源码、环境、配置或 checkpoint 哈希不一致；指数输入变量
 上限饱和率超过 1.5%。结果写入
-`results/pilot/protocol_1_2_1seed_v1/pilot_audit.json`。
+`results/pilot/protocol_1_2_1seed_v2/pilot_audit.json`。
 
 ## 正式实验
 

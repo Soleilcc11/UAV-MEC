@@ -132,7 +132,7 @@ GymBridge interactions each, followed by five-seed paired evaluation:
 It rejects the run if any value is NaN/Inf, task counts disagree with throughput
 or simulation time, latency samples are incomplete, any provenance hash differs,
 or the exponential-input saturation rate exceeds 1.5%. The result is written to
-`results/pilot/protocol_1_2_1seed_v1/pilot_audit.json`.
+`results/pilot/protocol_1_2_1seed_v2/pilot_audit.json`.
 
 ## Formal experiment
 

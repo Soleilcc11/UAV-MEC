@@ -174,6 +174,7 @@ public class SimSettings {
             
             edgeDevicesDoc.getDocumentElement().normalize();
             applicationsDoc.getDocumentElement().normalize();
+            validateEdgeLocationsWithinSimulationSpace();
             parseApplications(applicationsDoc);
             
         } catch (Exception e) {
@@ -250,6 +251,29 @@ public class SimSettings {
             taskNames[i] = application.getAttribute("name");
             for (int j = 0; j < fields.length; j++) {
                 taskLookUpTable[i][j] = getChildDouble(application, fields[j], 0.0);
+            }
+        }
+    }
+
+    private void validateEdgeLocationsWithinSimulationSpace() {
+        double[] space = getSimulationSpace();
+        if (space.length < 2
+                || !Double.isFinite(space[0]) || !Double.isFinite(space[1])
+                || space[0] <= 0.0 || space[1] <= 0.0) {
+            throw new IllegalArgumentException(
+                    "simulation_space x and y must be finite and positive");
+        }
+        NodeList locations = edgeDevicesDoc.getElementsByTagName("location");
+        for (int i = 0; i < locations.getLength(); i++) {
+            Element location = (Element) locations.item(i);
+            double x = getChildDouble(location, "x_pos", Double.NaN);
+            double y = getChildDouble(location, "y_pos", Double.NaN);
+            if (!Double.isFinite(x) || !Double.isFinite(y)
+                    || x < 0.0 || x > space[0]
+                    || y < 0.0 || y > space[1]) {
+                throw new IllegalArgumentException(
+                        "edge location " + i
+                                + " must lie within simulation_space");
             }
         }
     }

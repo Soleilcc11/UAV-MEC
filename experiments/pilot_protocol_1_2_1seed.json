@@ -1,15 +1,15 @@
 {
   "format_version": 1,
-  "experiment_id": "pilot_protocol_1_2_1seed_v1",
+  "experiment_id": "pilot_protocol_1_2_1seed_v2",
   "protocol_version": "1.2",
   "number_of_uavs": 1,
   "mobile_devices": 20,
   "interaction_budget": 512,
   "port": 12472,
-  "output_root": "results/pilot/protocol_1_2_1seed_v1",
+  "output_root": "results/pilot/protocol_1_2_1seed_v2",
   "environment": [
     "src/main/resources/config/pilot/simulation_settings.xml",
-    "src/main/resources/config/edge_devices.xml",
+    "src/main/resources/config/pilot/edge_devices.xml",
     "src/main/resources/config/pilot/applications.xml"
   ],
   "training_seed_start": 410001,

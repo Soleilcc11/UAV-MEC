@@ -103,9 +103,13 @@ restricted to `[-1, 1]`.
 ## Episode and seed semantics
 
 `terminated=True` means every configured task has naturally reached a terminal
-state. `truncated=True` means the simulation horizon or external interaction
-budget ended first; unfinished work is explicitly failed. Both flags cannot be
-true together.
+state. A GymBridge `truncated=True` means the simulation horizon ended first;
+Java explicitly fails work that was already in flight. The training runner's
+fixed interaction-budget cutoff is recorded separately as
+`interaction_budget_truncated=True` and is treated as a truncation by the
+learning buffer without inventing an extra simulator transition. The remaining
+episode state is discarded when that report's JVM closes. `terminated` and
+`truncated` cannot both be true.
 
 `reset(seed)` rebuilds the Java simulation and propagates the seed to workload,
 mobility, UAV initialization, and other simulator randomness. The same seed and

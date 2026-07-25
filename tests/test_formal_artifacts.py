@@ -208,6 +208,12 @@ def test_protocol_1_2_freezes_scale_budget_and_dqn_ablation_role():
     assert config["interaction_budget"] == 200_000
     assert config["bootstrap_resamples"] == 20_000
     assert config["primary_metric"] == "deadline_success_rate"
+    assert config["environments"]["training_validation"][1].endswith(
+        "config/edge_devices.xml"
+    )
+    assert config["pilot"]["environment"][1].endswith(
+        "config/pilot/edge_devices.xml"
+    )
     assert set(config["algorithms"]) == {
         "masked_parameterized_action_ddpg",
         "mixed_action_ppo",

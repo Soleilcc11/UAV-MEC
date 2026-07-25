@@ -1,6 +1,8 @@
 package edu.boun.edgecloudsim.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -41,6 +43,8 @@ class SimSettingsTest {
         assertEquals(3600.0, settings.getSimulationTime());
         assertEquals(4, settings.getUAVAccessChannelCount());
         assertEquals(0.99, settings.getSmdpDiscountBase());
+        assertTrue(settings.getUAVMaxEnergy()
+                >= settings.getSimulationTime() * settings.getUAVFlightPower());
         settings.initialize(
                 "src/main/resources/config/rural/simulation_settings.xml",
                 "src/main/resources/config/edge_devices.xml",
@@ -49,6 +53,8 @@ class SimSettingsTest {
         assertEquals(4.88, settings.getUAVLoSA());
         assertEquals(2, settings.getNumOfUAVs());
         assertEquals(3600.0, settings.getSimulationTime());
+        assertTrue(settings.getUAVMaxEnergy()
+                >= settings.getSimulationTime() * settings.getUAVFlightPower());
     }
 
     @Test
@@ -56,7 +62,7 @@ class SimSettingsTest {
         SimSettings settings = SimSettings.getInstance();
         settings.initialize(
                 "src/main/resources/config/pilot/simulation_settings.xml",
-                "src/main/resources/config/edge_devices.xml",
+                "src/main/resources/config/pilot/edge_devices.xml",
                 "src/main/resources/config/pilot/applications.xml");
 
         assertEquals(1, settings.getNumOfUAVs());
@@ -64,5 +70,17 @@ class SimSettingsTest {
         assertEquals(400.0, settings.getSimulationSpace()[0]);
         assertEquals(400.0, settings.getSimulationSpace()[1]);
         assertEquals(50.0, settings.getUAVInitialHeight());
+        assertTrue(settings.getUAVMaxEnergy()
+                >= settings.getSimulationTime() * settings.getUAVFlightPower());
+    }
+
+    @Test
+    void rejectsEdgeLocationsOutsideSimulationSpace() {
+        SimSettings settings = SimSettings.getInstance();
+
+        assertThrows(IllegalStateException.class, () -> settings.initialize(
+                "src/main/resources/config/pilot/simulation_settings.xml",
+                "src/main/resources/config/edge_devices.xml",
+                "src/main/resources/config/pilot/applications.xml"));
     }
 }

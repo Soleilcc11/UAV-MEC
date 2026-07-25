@@ -1,6 +1,6 @@
 {
   "format_version": 2,
-  "experiment_id": "formal_protocol_1_2_10seed_v1",
+  "experiment_id": "formal_protocol_1_2_10seed_v2",
   "protocol_version": "1.2",
   "number_of_uavs": 2,
   "mobile_devices": {
@@ -11,7 +11,7 @@
   "training_curve_bin_size": 2000,
   "bootstrap_resamples": 20000,
   "primary_metric": "deadline_success_rate",
-  "output_root": "results/formal/protocol_1_2_10seed_v1",
+  "output_root": "results/formal/protocol_1_2_10seed_v2",
   "ports": {
     "training_validation": 12470,
     "heldout": 12471
@@ -34,7 +34,7 @@
     "interaction_budget": 512,
     "environment": [
       "src/main/resources/config/pilot/simulation_settings.xml",
-      "src/main/resources/config/edge_devices.xml",
+      "src/main/resources/config/pilot/edge_devices.xml",
       "src/main/resources/config/pilot/applications.xml"
     ]
   },

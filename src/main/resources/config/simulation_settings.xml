@@ -13,7 +13,7 @@
     </general>
     <uav>
         <num_of_uavs>2</num_of_uavs>
-        <uav_max_energy>10000</uav_max_energy>
+        <uav_max_energy>200000</uav_max_energy>
         <uav_initial_height>50</uav_initial_height>
         <uav_flight_power>50</uav_flight_power>
         <uav_hover_power>20</uav_hover_power>

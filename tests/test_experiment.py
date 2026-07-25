@@ -6,8 +6,13 @@ import numpy as np
 import pytest
 import torch
 
-from uav_mec_gym.evaluation import MinimumEstimatedDelayPolicy, RandomMaskedPolicy
+from uav_mec_gym.evaluation import (
+    MinimumEstimatedDelayPolicy,
+    RandomMaskedPolicy,
+    evaluate_policy,
+)
 from uav_mec_gym.experiment import (
+    audit_episode_results,
     build_fair_evaluation_report,
     environment_manifest,
     repository_source_sha256,
@@ -315,6 +320,18 @@ def test_fair_report_records_paired_seeds_hashes_and_raw_metrics(tmp_path: Path)
             assert row["training_interactions"] == 0
         else:
             assert row["checkpoint"] is None
+
+
+def test_episode_audit_tolerates_one_ulp_mean_roundoff():
+    agent = _agent(seed=19)
+    episode_results = evaluate_policy(_ShortEpisodeEnv(), agent, [401])
+    result = episode_results[0]
+    maximum = result.audit_metric_maxima["cloud_resource_utilization"]
+    result.audit_metric_means["cloud_resource_utilization"] = float(
+        np.nextafter(maximum, np.inf)
+    )
+
+    audit_episode_results(episode_results)
 
 
 def test_fair_report_rejects_fewer_than_five_paired_seeds(tmp_path: Path):

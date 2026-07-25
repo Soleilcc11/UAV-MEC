@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -164,6 +165,9 @@ def test_td3_training_uses_exact_budget_and_records_online_updates():
     assert episodes[-1]["transitions"][-1]["interaction_budget_truncated"] is True
     assert episodes[0]["transitions"][0]["warmup_random"] is True
     assert len(updates) == 2
+    assert updates[0]["actor_loss"] is None
+    assert updates[0]["actor_grad_norm"] is None
+    json.dumps(updates, allow_nan=False)
     assert agent.update_count == 2
     assert agent.actor_update_count == 1
     assert agent.next_training_seed == 1003

@@ -69,7 +69,11 @@ SUMMARY_METRICS = (
 
 def canonical_hash(value: Any) -> str:
     encoded = json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -405,7 +409,7 @@ def train_replay_agent(
     *,
     interaction_budget: int,
     training_seed_start: int,
-) -> tuple[list[dict[str, Any]], list[dict[str, float]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Train a replay-buffer agent to a cumulative interaction target."""
 
     if interaction_budget <= 0:
@@ -417,7 +421,7 @@ def train_replay_agent(
             f"checkpoint's {starting_training_steps} training steps"
         )
     episodes: list[dict[str, Any]] = []
-    updates: list[dict[str, float]] = []
+    updates: list[dict[str, Any]] = []
 
     while agent.training_steps < interaction_budget:
         seed = agent.reserve_training_episode_seed(training_seed_start)
@@ -756,7 +760,13 @@ def build_fair_evaluation_report(
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True),
+        json.dumps(
+            payload,
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+        ),
         encoding="utf-8",
     )
 

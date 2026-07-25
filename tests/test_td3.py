@@ -124,6 +124,8 @@ def test_twin_critic_updates_before_delayed_actor_and_handles_terminal_mask():
     assert first_update is None
     assert second_update is not None
     assert second_update["actor_updated"] == 0.0
+    assert second_update["actor_loss"] is None
+    assert second_update["actor_grad_norm"] is None
     assert agent.update_count == 1
     assert agent.actor_update_count == 0
     for key, before in target_actor_before.items():
@@ -133,6 +135,8 @@ def test_twin_critic_updates_before_delayed_actor_and_handles_terminal_mask():
 
     assert third_update is not None
     assert third_update["actor_updated"] == 1.0
+    assert np.isfinite(third_update["actor_loss"])
+    assert np.isfinite(third_update["actor_grad_norm"])
     assert agent.update_count == 2
     assert agent.actor_update_count == 1
     assert any(

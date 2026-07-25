@@ -658,7 +658,7 @@ class MixedActionTD3:
         )
         self.training_steps += 1
 
-    def update(self) -> dict[str, float] | None:
+    def update(self) -> dict[str, float | None] | None:
         if (
             self.training_steps < self.config.learning_starts
             or len(self.replay_buffer) < self.config.batch_size
@@ -732,8 +732,8 @@ class MixedActionTD3:
         self.critic_optimizer.step()
         self.update_count += 1
 
-        actor_loss_value = math.nan
-        actor_grad_norm_value = math.nan
+        actor_loss_value: float | None = None
+        actor_grad_norm_value: float | None = None
         actor_updated = self.update_count % self.config.policy_delay == 0
         if actor_updated:
             actor_logits, actor_movements = self.actor(states)

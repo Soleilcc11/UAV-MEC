@@ -203,6 +203,57 @@ def _training_curve(
     ]
 
 
+def _optimization_curves(
+    report: Mapping[str, Any], *, bin_size: int, budget: int, seed: int
+) -> dict[str, list[dict[str, Any]]]:
+    algorithm = str(report["algorithm"])
+    metrics_by_algorithm = {
+        "masked_parameterized_action_ddpg": ("actor_loss", "critic_loss"),
+        "mixed_action_ppo": ("policy_loss", "value_loss"),
+        "mixed_action_td3": ("actor_loss", "critic_loss"),
+        "masked_dqn_zero_movement": ("loss",),
+    }
+    metrics = metrics_by_algorithm.get(algorithm, ())
+    bins: dict[str, dict[int, list[float]]] = {
+        metric: defaultdict(list) for metric in metrics
+    }
+    for update in report.get("updates", []):
+        raw_step = update.get("training_step", update.get("training_steps"))
+        if raw_step is None:
+            raise ValueError(f"Optimization update lacks a training step: {algorithm}/{seed}")
+        step = int(raw_step)
+        if step < 1 or step > budget:
+            raise ValueError(
+                f"Optimization update step is outside the fixed budget: "
+                f"{algorithm}/{seed}@{step}"
+            )
+        bin_index = (step - 1) // bin_size
+        for metric in metrics:
+            raw_value = update.get(metric)
+            if raw_value is None:
+                continue
+            value = float(raw_value)
+            if not np.isfinite(value):
+                raise ValueError(
+                    f"Non-finite optimization metric: {algorithm}/{seed}/{metric}@{step}"
+                )
+            bins[metric][bin_index].append(value)
+    return {
+        metric: [
+            {
+                "training_seed_start": seed,
+                "interaction_start": index * bin_size + 1,
+                "interaction_end": min((index + 1) * bin_size, budget),
+                "mean": float(np.mean(values)),
+                "update_count": len(values),
+            }
+            for index, values in sorted(metric_bins.items())
+        ]
+        for metric, metric_bins in bins.items()
+        if metric_bins
+    }
+
+
 def _evaluation_rows(
     report: Mapping[str, Any],
     *,
@@ -292,6 +343,56 @@ def _summarize_training_curves(
     return result
 
 
+def _summarize_optimization_curves(
+    curves: Mapping[str, list[dict[str, list[dict[str, Any]]]]]
+) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for algorithm, replicates in curves.items():
+        metric_names = sorted(
+            {metric for replicate in replicates for metric in replicate}
+        )
+        result[algorithm] = {}
+        for metric in metric_names:
+            end_steps = sorted(
+                {
+                    point["interaction_end"]
+                    for replicate in replicates
+                    for point in replicate.get(metric, [])
+                }
+            )
+            points = []
+            for end_step in end_steps:
+                values = [
+                    point["mean"]
+                    for replicate in replicates
+                    for point in replicate.get(metric, [])
+                    if point["interaction_end"] == end_step
+                ]
+                if len(values) != len(replicates):
+                    raise ValueError(
+                        f"Incomplete optimization curve bin for "
+                        f"{algorithm}/{metric}@{end_step}"
+                    )
+                points.append(
+                    {
+                        "interaction_end": end_step,
+                        **bootstrap_summary(
+                            values,
+                            seed=_stable_seed(
+                                algorithm, "optimization", metric, str(end_step)
+                            ),
+                        ),
+                    }
+                )
+            result[algorithm][metric] = {
+                "replicates": [
+                    replicate.get(metric, []) for replicate in replicates
+                ],
+                "summary": points,
+            }
+    return result
+
+
 def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
     config = read_json(config_path)
     config_sha256 = file_sha256(config_path)
@@ -311,6 +412,9 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
     budget = int(config["interaction_budget"])
     bin_size = int(config["training_curve_bin_size"])
     training_curves: dict[str, list[list[dict[str, Any]]]] = defaultdict(list)
+    optimization_curves: dict[
+        str, list[dict[str, list[dict[str, Any]]]]
+    ] = defaultdict(list)
     candidate_rows: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
         lambda: defaultdict(list)
     )
@@ -348,6 +452,14 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
             checkpoint_hashes[algorithm][seed] = str(training["checkpoint"]["sha256"])
             training_curves[algorithm].append(
                 _training_curve(training, bin_size=bin_size, seed=seed)
+            )
+            optimization_curves[algorithm].append(
+                _optimization_curves(
+                    training,
+                    bin_size=bin_size,
+                    budget=budget,
+                    seed=seed,
+                )
             )
 
             for split in ("validation", "heldout"):
@@ -468,6 +580,9 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
         "checkpoint_hashes": checkpoint_hashes,
         "metrics": list(METRICS),
         "training_curves": _summarize_training_curves(training_curves),
+        "optimization_curves": _summarize_optimization_curves(
+            optimization_curves
+        ),
         "replicate_means": replicate_means,
         "summaries": summaries,
         "audit": {

@@ -167,7 +167,10 @@ intervals resample ten independently trained checkpoint means; paired effects
 subtract the same-seed baseline before resampling.
 
 See [the formal protocol](docs/experiments/formal-protocol.md) and
-[artifact publication plan](docs/experiments/artifact-publication.md).
+[artifact publication plan](docs/experiments/artifact-publication.md). The
+completed protocol-1.2 findings are documented in the
+[Chinese formal-study manuscript](docs/paper/uav-mec-formal-study-zh.md), with a
+short [Chinese project introduction](docs/project-introduction-zh.md).
 
 ## Reproducibility boundary
 

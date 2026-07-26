@@ -155,7 +155,9 @@ Pilot 使用同一个训练种子依次运行 4 个算法，每个算法进行 5
 种子减去基线，再进行重采样。
 
 详细说明见[正式协议](docs/experiments/formal-protocol.md)和
-[实验产物发布计划](docs/experiments/artifact-publication.md)。
+[实验产物发布计划](docs/experiments/artifact-publication.md)。protocol 1.2
+完整结果与讨论见[中文论文稿](docs/paper/uav-mec-formal-study-zh.md)，约 100 字
+简介见[项目简介](docs/project-introduction-zh.md)。
 
 ## 可复现边界
 

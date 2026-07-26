@@ -158,6 +158,44 @@ def test_plotter_emits_vector_and_300_dpi_raster_figures(tmp_path: Path):
                     assert image.width >= 1500
 
 
+def test_plotter_emits_optimization_loss_diagnostics_when_available(
+    tmp_path: Path,
+):
+    payload = _synthetic_summary()
+    payload["optimization_curves"] = {}
+    for algorithm_index, algorithm in enumerate(
+        (
+            "masked_parameterized_action_ddpg",
+            "mixed_action_ppo",
+            "masked_dqn_zero_movement",
+            "mixed_action_td3",
+        )
+    ):
+        metric = "loss"
+        payload["optimization_curves"][algorithm] = {
+            metric: {
+                "summary": [
+                    {
+                        "interaction_end": 256,
+                        **_stats([1.0 + algorithm_index] * 10),
+                    },
+                    {
+                        "interaction_end": 512,
+                        **_stats([0.5 + algorithm_index] * 10),
+                    },
+                ]
+            }
+        }
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(json.dumps(payload), encoding="utf-8")
+    output = tmp_path / "figures"
+
+    manifest = create_figures(summary_path, output)
+
+    assert "optimization_losses" in manifest["figures"]
+    assert len(manifest["figures"]["optimization_losses"]["files"]) == 3
+
+
 def test_formal_config_rejects_fewer_than_ten_training_seeds():
     config = {
         "format_version": 2,

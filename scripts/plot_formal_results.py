@@ -59,6 +59,13 @@ LEARNED_ALGORITHMS = (
     "masked_dqn_zero_movement",
     "mixed_action_td3",
 )
+LOSS_LABELS = {
+    "actor_loss": "Actor loss",
+    "critic_loss": "Critic loss",
+    "policy_loss": "Policy loss",
+    "value_loss": "Value loss",
+    "loss": "Loss",
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -163,6 +170,61 @@ def plot_training_curves(
     axis.legend(frameon=False, ncol=2, loc="best")
     _finish_axis(axis)
     return _save_figure(figure, output_dir, "training_curves", summary_sha256)
+
+
+def plot_optimization_losses(
+    summary: Mapping[str, Any], output_dir: Path, summary_sha256: str
+) -> list[str]:
+    figure, axes = plt.subplots(
+        2, 2, figsize=(7.15, 4.75), constrained_layout=True, squeeze=False
+    )
+    for axis, algorithm in zip(axes.flat, LEARNED_ALGORITHMS, strict=True):
+        metrics = list(summary["optimization_curves"][algorithm].items())
+        metric_axes = [axis]
+        if len(metrics) > 1:
+            secondary_axis = axis.twinx()
+            secondary_axis.spines["top"].set_visible(False)
+            metric_axes.append(secondary_axis)
+        handles = []
+        labels = []
+        for metric_index, (metric, payload) in enumerate(metrics):
+            metric_axis = metric_axes[metric_index]
+            points = payload["summary"]
+            x = np.asarray(
+                [point["interaction_end"] for point in points], dtype=float
+            )
+            mean = np.asarray([point["mean"] for point in points], dtype=float)
+            low = np.asarray(
+                [point["bootstrap_95_ci_low"] for point in points], dtype=float
+            )
+            high = np.asarray(
+                [point["bootstrap_95_ci_high"] for point in points], dtype=float
+            )
+            color = "#0072B2" if metric_index == 0 else "#D55E00"
+            line = metric_axis.plot(
+                x,
+                mean,
+                color=color,
+                label=LOSS_LABELS.get(metric, metric.replace("_", " ").title()),
+            )[0]
+            metric_axis.fill_between(
+                x, low, high, color=line.get_color(), alpha=0.14, linewidth=0
+            )
+            label = LOSS_LABELS.get(metric, metric.replace("_", " ").title())
+            metric_axis.set_ylabel(label, color=color)
+            metric_axis.tick_params(axis="y", colors=color)
+            handles.append(line)
+            labels.append(label)
+        axis.set_title(ALGORITHM_LABELS[algorithm], loc="left")
+        axis.set_xlabel("Real GymBridge interactions")
+        axis.legend(handles, labels, frameon=False, loc="best")
+        _finish_axis(axis)
+    figure.suptitle(
+        "Optimization diagnostics across 10 independent seeds", x=0.01, ha="left"
+    )
+    return _save_figure(
+        figure, output_dir, "optimization_losses", summary_sha256
+    )
 
 
 def _policy_values(
@@ -336,6 +398,20 @@ def create_figures(summary_path: Path, output_dir: Path) -> dict[str, Any]:
             ),
         },
     }
+    if summary.get("optimization_curves"):
+        figures["optimization_losses"] = {
+            "files": plot_optimization_losses(
+                summary, output_dir, summary_sha256
+            ),
+            "caption": (
+                "Optimization losses in "
+                f"{summary.get('training_curve_bin_size', 2000)}-interaction bins. "
+                "Lines show means and bands show nonparametric 95% confidence "
+                "intervals across ten independent training seeds. Actor/policy and "
+                "critic/value losses use separate colored axes; loss magnitudes are "
+                "algorithm-specific and must not be compared across panels."
+            ),
+        }
     manifest = {
         "format_version": 2,
         "protocol_version": "1.2",

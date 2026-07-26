@@ -7,7 +7,12 @@ from typing import Any
 
 import numpy as np
 
-from .contract import BackendStep, Observation, RewardComponents
+from .contract import (
+    BackendStep,
+    Observation,
+    PROTOCOL_VERSION as GYM_PROTOCOL_VERSION,
+    RewardComponents,
+)
 
 
 class GymBridgeError(RuntimeError):
@@ -17,7 +22,7 @@ class GymBridgeError(RuntimeError):
 class JavaGymBridgeBackend:
     """Newline-delimited JSON client for the EdgeCloudSim GymBridge server."""
 
-    PROTOCOL_VERSION = "1.1"
+    PROTOCOL_VERSION = GYM_PROTOCOL_VERSION
 
     def __init__(
         self,
@@ -50,8 +55,12 @@ class JavaGymBridgeBackend:
         assert self.specification is not None
         return int(self.specification["number_of_uavs"])
 
-    def reset(self, seed: int | None) -> tuple[Observation, dict[str, Any]]:
-        response = self._request("reset", seed=0 if seed is None else int(seed))
+    def reset(self, seed: int) -> tuple[Observation, dict[str, Any]]:
+        if seed is None:
+            raise ValueError(
+                "JavaGymBridgeBackend requires an explicit episode seed"
+            )
+        response = self._request("reset", seed=int(seed))
         return response["observation"], dict(response["info"])
 
     def step(self, target: int, movement: np.ndarray) -> BackendStep:
@@ -111,11 +120,48 @@ class JavaGymBridgeBackend:
                 raise GymBridgeError(
                     "GymBridge UAV count does not match the Gymnasium environment"
                 )
+            self._validate_specification(specification, uav_count)
             self._validate_provenance(specification)
             self.specification = specification
         except Exception:
             self._disconnect()
             raise
+
+    @staticmethod
+    def _validate_specification(
+        specification: dict[str, Any], uav_count: int
+    ) -> None:
+        action = specification.get("action")
+        observation = specification.get("observation")
+        if (
+            specification.get("decision_cadence") != "task_arrival"
+            or not isinstance(action, dict)
+            or not isinstance(observation, dict)
+        ):
+            raise GymBridgeError("GymBridge hello omitted the frozen 1.2 contract")
+        expected_action = {
+            "target_count": 2 + uav_count,
+            "movement_shape": [uav_count, 3],
+            "movement_low": -1.0,
+            "movement_high": 1.0,
+        }
+        if any(action.get(key) != value for key, value in expected_action.items()):
+            raise GymBridgeError("GymBridge hello returned an incompatible action contract")
+        expected_observation = {
+            "time_shape": [1],
+            "delta_time_shape": [1],
+            "task_shape": [7],
+            "resources_shape": [2, 3],
+            "uavs_shape": [uav_count, 8],
+            "action_mask_shape": [2 + uav_count],
+        }
+        if any(
+            observation.get(key) != value
+            for key, value in expected_observation.items()
+        ):
+            raise GymBridgeError(
+                "GymBridge hello returned an incompatible observation contract"
+            )
 
     def _validate_provenance(self, specification: dict[str, Any]) -> None:
         raw = specification.get("provenance")

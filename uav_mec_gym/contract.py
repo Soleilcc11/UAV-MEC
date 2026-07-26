@@ -9,6 +9,7 @@ from gymnasium import spaces
 
 
 Observation = Mapping[str, np.ndarray]
+PROTOCOL_VERSION = "1.2"
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,7 @@ class BackendStep:
 
 
 class GymBackend(Protocol):
-    def reset(self, seed: int | None) -> tuple[Observation, Mapping[str, Any]]: ...
+    def reset(self, seed: int) -> tuple[Observation, Mapping[str, Any]]: ...
 
     def step(self, target: int, movement: np.ndarray) -> BackendStep: ...
 
@@ -52,7 +53,7 @@ class UAVMECGymEnv(gym.Env[dict[str, np.ndarray], dict[str, Any]]):
         backend_uav_count = getattr(backend, "number_of_uavs", number_of_uavs)
         if backend_uav_count != number_of_uavs:
             raise ValueError("Backend UAV count does not match the Gymnasium environment")
-        target_count = 3 + number_of_uavs
+        target_count = 2 + number_of_uavs
         self.action_space = spaces.Dict(
             {
                 "target": spaces.Discrete(target_count),
@@ -67,8 +68,9 @@ class UAVMECGymEnv(gym.Env[dict[str, np.ndarray], dict[str, Any]]):
         self.observation_space = spaces.Dict(
             {
                 "time": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32),
+                "delta_time": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32),
                 "task": spaces.Box(0.0, 1.0, shape=(7,), dtype=np.float32),
-                "resources": spaces.Box(0.0, 1.0, shape=(3, 3), dtype=np.float32),
+                "resources": spaces.Box(0.0, 1.0, shape=(2, 3), dtype=np.float32),
                 "uavs": spaces.Box(
                     0.0, 1.0, shape=(number_of_uavs, 8), dtype=np.float32
                 ),
@@ -83,8 +85,28 @@ class UAVMECGymEnv(gym.Env[dict[str, np.ndarray], dict[str, Any]]):
         options: dict[str, Any] | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         super().reset(seed=seed)
-        observation, info = self.backend.reset(seed)
-        return self._validate_observation(observation), dict(info)
+        # Gymnasium keeps ``np_random`` alive across reset(seed=None).  Derive
+        # an explicit Java-compatible seed from that stream instead of mapping
+        # every unseeded episode to zero.  An explicit caller seed remains the
+        # simulator seed required by the frozen reproducibility contract.
+        episode_seed = (
+            int(seed)
+            if seed is not None
+            else int(
+                self.np_random.integers(
+                    0, np.iinfo(np.int64).max, dtype=np.int64
+                )
+            )
+        )
+        observation, backend_info = self.backend.reset(episode_seed)
+        info = dict(backend_info)
+        if "seed" not in info:
+            raise ValueError("Backend reset omitted the actual episode seed")
+        echoed_seed = info["seed"]
+        if int(echoed_seed) != episode_seed:
+            raise ValueError("Backend reset did not echo the actual episode seed")
+        info["seed"] = episode_seed
+        return self._validate_observation(observation), info
 
     def step(
         self, action: dict[str, Any]
@@ -115,7 +137,7 @@ class UAVMECGymEnv(gym.Env[dict[str, np.ndarray], dict[str, Any]]):
     def calculate_reward(components: RewardComponents) -> float:
         """Reference calculation for a single settled task.
 
-        Production GymBridge 1.1 supplies the authoritative interval reward,
+        Production GymBridge 1.2 supplies the authoritative interval reward,
         which can aggregate several concurrent task settlements.
         """
         reward = (
@@ -130,6 +152,9 @@ class UAVMECGymEnv(gym.Env[dict[str, np.ndarray], dict[str, Any]]):
     def _validate_observation(self, observation: Observation) -> dict[str, np.ndarray]:
         normalized = {
             "time": np.asarray(observation["time"], dtype=np.float32),
+            "delta_time": np.asarray(
+                observation["delta_time"], dtype=np.float32
+            ),
             "task": np.asarray(observation["task"], dtype=np.float32),
             "resources": np.asarray(observation["resources"], dtype=np.float32),
             "uavs": np.asarray(observation["uavs"], dtype=np.float32),

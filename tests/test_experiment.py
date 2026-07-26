@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
-from uav_mec_gym.evaluation import MinimumEstimatedDelayPolicy, RandomMaskedPolicy
+from uav_mec_gym.evaluation import (
+    MinimumEstimatedDelayPolicy,
+    RandomMaskedPolicy,
+    evaluate_policy,
+)
 from uav_mec_gym.experiment import (
+    audit_episode_results,
     build_fair_evaluation_report,
     environment_manifest,
     repository_source_sha256,
+    train_td3,
     train_ppo,
 )
 from uav_mec_gym.ppo import MixedActionPPO, PPOConfig
+from uav_mec_gym.td3 import MixedActionTD3, TD3Config
 
 
 class _ShortEpisodeEnv:
@@ -28,7 +36,7 @@ class _ShortEpisodeEnv:
         return self._observation(), {"seed": self.seed}
 
     def step(self, action):
-        assert int(action["target"]) in (1, 2, 3, 4)
+        assert int(action["target"]) in (1, 2, 3)
         assert np.asarray(action["movement"]).shape == (2, 3)
         self.steps += 1
         terminated = self.steps >= 2
@@ -40,8 +48,23 @@ class _ShortEpisodeEnv:
             False,
             {
                 "settled_tasks": self.steps,
+                "settled_in_transition": 1,
                 "total_tasks": 2,
                 "simulation_time": float(self.steps),
+                "elapsed_simulation_time": 1.0,
+                "effective_discount": 0.99,
+                "selected_cloud_relay_uav": -1,
+                "throughput_tasks_per_second": success / float(self.steps),
+                "uav_queue_length_total": 0,
+                "uav_queue_length_max": 0,
+                "active_access_uploads": 0,
+                "active_access_downloads": 0,
+                "active_backhaul_uploads": 0,
+                "active_backhaul_downloads": 0,
+                "local_resource_utilization": 0.1,
+                "cloud_resource_utilization": 0.2,
+                "uav_resource_utilization": 0.3,
+                "settled_task_latencies_seconds": [1.0],
                 "reward_components": {
                     "success": success,
                     "latency_ratio": 0.25,
@@ -60,14 +83,15 @@ class _ShortEpisodeEnv:
     def _observation(self, terminal=False):
         return {
             "time": np.array([1.0 if terminal else self.steps / 2], dtype=np.float32),
+            "delta_time": np.array([0.5], dtype=np.float32),
             "task": np.zeros(7, dtype=np.float32)
             if terminal
             else np.full(7, 0.25, dtype=np.float32),
-            "resources": np.full((3, 3), 0.4, dtype=np.float32),
+            "resources": np.full((2, 3), 0.4, dtype=np.float32),
             "uavs": np.full((2, 8), 0.3, dtype=np.float32),
-            "action_mask": np.zeros(5, dtype=np.int8)
+            "action_mask": np.zeros(4, dtype=np.int8)
             if terminal
-            else np.array([0, 1, 1, 1, 1], dtype=np.int8),
+            else np.array([0, 1, 1, 1], dtype=np.int8),
         }
 
 
@@ -79,6 +103,21 @@ def _agent(seed=7):
             rollout_steps=2,
             minibatch_size=2,
             update_epochs=1,
+            normalize_observations=False,
+        ),
+        seed=seed,
+    )
+
+
+def _td3_agent(seed=7):
+    return MixedActionTD3(
+        2,
+        TD3Config(
+            hidden_sizes=(8,),
+            batch_size=2,
+            replay_capacity=16,
+            learning_starts=2,
+            policy_delay=2,
             normalize_observations=False,
         ),
         seed=seed,
@@ -107,6 +146,31 @@ def test_training_uses_exact_interaction_budget_and_flushes_tail():
     assert agent.training_seed_start == 101
     assert agent.training_episode_count == 2
     assert agent.next_training_seed == 103
+
+
+def test_td3_training_uses_exact_budget_and_records_online_updates():
+    agent = _td3_agent()
+
+    episodes, updates = train_td3(
+        _ShortEpisodeEnv(),
+        agent,
+        interaction_budget=3,
+        training_seed_start=1001,
+    )
+
+    assert agent.training_steps == 3
+    assert sum(episode["steps"] for episode in episodes) == 3
+    assert [episode["seed"] for episode in episodes] == [1001, 1002]
+    assert episodes[-1]["truncated"] is True
+    assert episodes[-1]["transitions"][-1]["interaction_budget_truncated"] is True
+    assert episodes[0]["transitions"][0]["warmup_random"] is True
+    assert len(updates) == 2
+    assert updates[0]["actor_loss"] is None
+    assert updates[0]["actor_grad_norm"] is None
+    json.dumps(updates, allow_nan=False)
+    assert agent.update_count == 2
+    assert agent.actor_update_count == 1
+    assert agent.next_training_seed == 1003
 
 
 def test_checkpoint_resume_matches_uninterrupted_training_and_advances_seeds(
@@ -262,6 +326,18 @@ def test_fair_report_records_paired_seeds_hashes_and_raw_metrics(tmp_path: Path)
             assert row["checkpoint"] is None
 
 
+def test_episode_audit_tolerates_one_ulp_mean_roundoff():
+    agent = _agent(seed=19)
+    episode_results = evaluate_policy(_ShortEpisodeEnv(), agent, [401])
+    result = episode_results[0]
+    maximum = result.audit_metric_maxima["cloud_resource_utilization"]
+    result.audit_metric_means["cloud_resource_utilization"] = float(
+        np.nextafter(maximum, np.inf)
+    )
+
+    audit_episode_results(episode_results)
+
+
 def test_fair_report_rejects_fewer_than_five_paired_seeds(tmp_path: Path):
     checkpoint = tmp_path / "ppo.pt"
     agent = _agent()
@@ -277,3 +353,29 @@ def test_fair_report_rejects_fewer_than_five_paired_seeds(tmp_path: Path):
             commit_sha="abc123",
             checkpoint_path=checkpoint,
         )
+
+
+def test_fair_report_accepts_td3_as_the_single_learned_candidate(tmp_path: Path):
+    checkpoint = tmp_path / "td3.pt"
+    agent = _td3_agent(seed=31)
+    agent.save_checkpoint(checkpoint)
+
+    report = build_fair_evaluation_report(
+        _ShortEpisodeEnv(),
+        [RandomMaskedPolicy(2), MinimumEstimatedDelayPolicy(2), agent],
+        seeds=list(range(301, 311)),
+        split="heldout",
+        environment={"files": [], "sha256": "environment-hash"},
+        commit_sha="abc123",
+        checkpoint_path=checkpoint,
+    )
+
+    assert report["checkpoint"]["sha256"]
+    assert report["training_interactions"]["mixed_action_td3"] == 0
+    assert "minimum_estimated_delay" in report["paired_candidate_minus_reference"]
+    candidate_rows = [
+        row for row in report["episodes"] if row["policy"] == "mixed_action_td3"
+    ]
+    assert len(candidate_rows) == 10
+    assert all(row["checkpoint_sha256"] for row in candidate_rows)
+    assert report["audit"]["interpretation"].startswith("descriptive smoke evidence")

@@ -1,0 +1,68 @@
+{
+  "format_version": 1,
+  "experiment_id": "formal_protocol_1_1_10seed_v3",
+  "protocol_version": "1.1",
+  "number_of_uavs": 2,
+  "interaction_budget": 4096,
+  "training_curve_bin_size": 256,
+  "output_root": "results/formal/protocol_1_1_10seed_v3",
+  "ports": {
+    "training_validation": 12470,
+    "heldout": 12471
+  },
+  "environments": {
+    "training_validation": [
+      "src/test/resources/config/simulation_settings.xml",
+      "src/test/resources/config/edge_devices.xml",
+      "src/test/resources/config/applications.xml"
+    ],
+    "heldout": [
+      "src/test/resources/config/heldout/simulation_settings.xml",
+      "src/test/resources/config/heldout/edge_devices.xml",
+      "src/test/resources/config/heldout/applications.xml"
+    ]
+  },
+  "evaluation_seeds": {
+    "validation": [201, 202, 203, 204, 205, 206, 207, 208, 209, 210],
+    "heldout": [301, 302, 303, 304, 305, 306, 307, 308, 309, 310]
+  },
+  "algorithms": {
+    "mixed_action_ppo": {
+      "command": "train-ppo",
+      "evaluation_algorithm": "ppo",
+      "training_seed_starts": [
+        10001, 20001, 30001, 40001, 50001,
+        60001, 70001, 80001, 90001, 100001
+      ],
+      "arguments": {
+        "rollout-steps": 256,
+        "minibatch-size": 64,
+        "update-epochs": 10,
+        "hidden-sizes": [128, 128],
+        "learning-rate": 0.0003
+      }
+    },
+    "mixed_action_td3": {
+      "command": "train-td3",
+      "evaluation_algorithm": "td3",
+      "training_seed_starts": [
+        110001, 120001, 130001, 140001, 150001,
+        160001, 170001, 180001, 190001, 200001
+      ],
+      "arguments": {
+        "batch-size": 128,
+        "replay-capacity": 10000,
+        "learning-starts": 512,
+        "policy-delay": 2,
+        "hidden-sizes": [128, 128],
+        "actor-learning-rate": 0.0003,
+        "critic-learning-rate": 0.0003,
+        "policy-noise": 0.2,
+        "noise-clip": 0.5,
+        "exploration-noise": 0.1,
+        "discrete-exploration": 0.1,
+        "target-temperature": 1.0
+      }
+    }
+  }
+}

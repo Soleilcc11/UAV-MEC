@@ -7,6 +7,7 @@ import java.util.Calendar;
 import java.util.List;
 
 import org.cloudbus.cloudsim.core.CloudSim;
+import org.cloudbus.cloudsim.UtilizationModelFull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -65,5 +66,19 @@ class UAVTaskTest {
 
         assertEquals(15.0, uav.getPosition()[0], 1e-9);
         assertEquals(24.0, uav.getFlightEnergyConsumed(), 1e-9);
+    }
+
+    @Test
+    void cloudTaskKeepsOneRelayForItsFullRoundTrip() {
+        UtilizationModelFull utilization = new UtilizationModelFull();
+        edu.boun.edgecloudsim.edge_client.Task task =
+                new edu.boun.edgecloudsim.edge_client.Task(
+                        0, 1, 1000, 1, 100, 10,
+                        utilization, utilization, utilization);
+
+        assertEquals(-1, task.getCloudRelayUavId());
+        task.setCloudRelayUavId(1);
+        assertEquals(1, task.getCloudRelayUavId());
+        assertEquals(1, task.getCloudRelayUavId());
     }
 }

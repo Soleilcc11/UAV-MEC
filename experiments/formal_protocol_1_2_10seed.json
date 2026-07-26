@@ -1,0 +1,132 @@
+{
+  "format_version": 2,
+  "experiment_id": "formal_protocol_1_2_10seed_v2",
+  "protocol_version": "1.2",
+  "number_of_uavs": 2,
+  "mobile_devices": {
+    "training_validation": 25,
+    "heldout": 15
+  },
+  "interaction_budget": 200000,
+  "training_curve_bin_size": 2000,
+  "bootstrap_resamples": 20000,
+  "primary_metric": "deadline_success_rate",
+  "output_root": "results/formal/protocol_1_2_10seed_v2",
+  "ports": {
+    "training_validation": 12470,
+    "heldout": 12471
+  },
+  "environments": {
+    "training_validation": [
+      "src/main/resources/config/urban/simulation_settings.xml",
+      "src/main/resources/config/edge_devices.xml",
+      "src/main/resources/config/urban/applications.xml"
+    ],
+    "heldout": [
+      "src/main/resources/config/rural/simulation_settings.xml",
+      "src/main/resources/config/edge_devices.xml",
+      "src/main/resources/config/rural/applications.xml"
+    ]
+  },
+  "pilot": {
+    "number_of_uavs": 1,
+    "mobile_devices": 20,
+    "interaction_budget": 512,
+    "environment": [
+      "src/main/resources/config/pilot/simulation_settings.xml",
+      "src/main/resources/config/pilot/edge_devices.xml",
+      "src/main/resources/config/pilot/applications.xml"
+    ]
+  },
+  "evaluation_seeds": {
+    "validation": [201, 202, 203, 204, 205, 206, 207, 208, 209, 210],
+    "heldout": [301, 302, 303, 304, 305, 306, 307, 308, 309, 310]
+  },
+  "baselines": [
+    "random_masked",
+    "minimum_estimated_delay",
+    "local_only",
+    "cloud_only"
+  ],
+  "algorithms": {
+    "masked_parameterized_action_ddpg": {
+      "command": "train-ddpg",
+      "evaluation_algorithm": "ddpg",
+      "comparison_role": "main",
+      "training_seed_starts": [
+        10001, 20001, 30001, 40001, 50001,
+        60001, 70001, 80001, 90001, 100001
+      ],
+      "arguments": {
+        "batch-size": 128,
+        "replay-capacity": 100000,
+        "learning-starts": 1024,
+        "hidden-sizes": [128, 128],
+        "actor-learning-rate": 0.0003,
+        "critic-learning-rate": 0.0003,
+        "exploration-noise": 0.1,
+        "discrete-exploration": 0.1,
+        "target-temperature": 1.0
+      }
+    },
+    "mixed_action_ppo": {
+      "command": "train-ppo",
+      "evaluation_algorithm": "ppo",
+      "comparison_role": "main",
+      "training_seed_starts": [
+        10001, 20001, 30001, 40001, 50001,
+        60001, 70001, 80001, 90001, 100001
+      ],
+      "arguments": {
+        "rollout-steps": 2048,
+        "minibatch-size": 128,
+        "update-epochs": 10,
+        "hidden-sizes": [128, 128],
+        "learning-rate": 0.0003
+      }
+    },
+    "mixed_action_td3": {
+      "command": "train-td3",
+      "evaluation_algorithm": "td3",
+      "comparison_role": "main",
+      "training_seed_starts": [
+        10001, 20001, 30001, 40001, 50001,
+        60001, 70001, 80001, 90001, 100001
+      ],
+      "arguments": {
+        "batch-size": 128,
+        "replay-capacity": 100000,
+        "learning-starts": 1024,
+        "policy-delay": 2,
+        "hidden-sizes": [128, 128],
+        "actor-learning-rate": 0.0003,
+        "critic-learning-rate": 0.0003,
+        "policy-noise": 0.2,
+        "noise-clip": 0.5,
+        "exploration-noise": 0.1,
+        "discrete-exploration": 0.1,
+        "target-temperature": 1.0
+      }
+    },
+    "masked_dqn_zero_movement": {
+      "command": "train-dqn",
+      "evaluation_algorithm": "dqn",
+      "comparison_role": "action_capability_ablation",
+      "training_seed_starts": [
+        10001, 20001, 30001, 40001, 50001,
+        60001, 70001, 80001, 90001, 100001
+      ],
+      "arguments": {
+        "batch-size": 128,
+        "replay-capacity": 100000,
+        "learning-starts": 1024,
+        "target-update-interval": 250,
+        "epsilon-start": 1.0,
+        "epsilon-end": 0.05,
+        "epsilon-decay-steps": 200000,
+        "hidden-sizes": [128, 128],
+        "learning-rate": 0.0003
+      }
+    }
+  }
+}

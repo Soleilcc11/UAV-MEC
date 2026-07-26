@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<simulation_settings>
+    <general>
+        <simulation_time>3600</simulation_time>
+        <warm_up_period>0</warm_up_period>
+        <vm_load_check_interval>1</vm_load_check_interval>
+        <location_check_interval>1</location_check_interval>
+        <file_log_enabled>false</file_log_enabled>
+        <deep_file_log_enabled>false</deep_file_log_enabled>
+        <simulation_seed>42</simulation_seed>
+        <smdp_discount_base>0.99</smdp_discount_base>
+        <smdp_discount_time_unit_seconds>1.0</smdp_discount_time_unit_seconds>
+    </general>
+    <uav>
+        <num_of_uavs>2</num_of_uavs>
+        <uav_max_energy>200000</uav_max_energy>
+        <uav_initial_height>80</uav_initial_height>
+        <uav_min_height>20</uav_min_height>
+        <uav_max_height>200</uav_max_height>
+        <uav_flight_power>50</uav_flight_power>
+        <uav_hover_power>20</uav_hover_power>
+        <uav_compute_energy_per_mi>0.001</uav_compute_energy_per_mi>
+        <uav_environment>rural</uav_environment>
+        <uav_access_bandwidth_mbps>10</uav_access_bandwidth_mbps>
+        <uav_access_channels>4</uav_access_channels>
+        <uav_tx_power_w>0.1</uav_tx_power_w>
+        <uav_noise_psd_dbm_hz>-174</uav_noise_psd_dbm_hz>
+        <uav_carrier_frequency_hz>2000000000</uav_carrier_frequency_hz>
+        <uav_urban_los_a>9.61</uav_urban_los_a>
+        <uav_urban_los_b>0.16</uav_urban_los_b>
+        <uav_urban_eta_los_db>1.0</uav_urban_eta_los_db>
+        <uav_urban_eta_nlos_db>20.0</uav_urban_eta_nlos_db>
+        <uav_rural_los_a>4.88</uav_rural_los_a>
+        <uav_rural_los_b>0.43</uav_rural_los_b>
+        <uav_rural_eta_los_db>0.1</uav_rural_eta_los_db>
+        <uav_rural_eta_nlos_db>21.0</uav_rural_eta_nlos_db>
+        <uav_cloud_bandwidth_mbps>100</uav_cloud_bandwidth_mbps>
+        <uav_cloud_propagation_delay>0.02</uav_cloud_propagation_delay>
+        <uav_cloud_distance_m>20000</uav_cloud_distance_m>
+    </uav>
+    <simulation_space><x>2000</x><y>2000</y><z>200</z></simulation_space>
+    <scenario><single_tier>true</single_tier><two_tier>false</two_tier><two_tier_with_EO>false</two_tier_with_EO></scenario>
+    <orchestrator><random>true</random><ddpg>false</ddpg></orchestrator>
+</simulation_settings>

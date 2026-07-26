@@ -3,6 +3,7 @@ from __future__ import annotations
 import socket
 import subprocess
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,11 @@ from uav_mec_gym.experiment import (
     current_commit_sha,
     environment_manifest,
     repository_source_sha256,
+)
+from uav_mec_gym.evaluation import (
+    MinimumEstimatedDelayPolicy,
+    RandomMaskedPolicy,
+    evaluate_policy,
 )
 
 
@@ -118,3 +124,67 @@ def test_real_java_python_bridge_performs_verified_transition() -> None:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+
+
+def test_repeated_seed_is_bitwise_deterministic_across_fresh_jvms() -> None:
+    repository = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        ["mvn", "package", "-q", "-DskipTests"],
+        cwd=repository,
+        check=True,
+        timeout=60,
+    )
+    config_paths = [
+        repository / "src/test/resources/config/simulation_settings.xml",
+        repository / "src/test/resources/config/edge_devices.xml",
+        repository / "src/test/resources/config/applications.xml",
+    ]
+    environment = environment_manifest(config_paths)
+    repeated_signatures: list[list[dict[str, object]]] = []
+
+    for _ in range(3):
+        port = _free_loopback_port()
+        process = subprocess.Popen(
+            [
+                "java",
+                "-cp",
+                "target/classes:target/lib/*:src/main/resources/lib/*",
+                "edu.boun.edgecloudsim.uav.GymBridgeMain",
+                str(port),
+                *(str(path) for path in config_paths),
+                "2",
+            ],
+            cwd=repository,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+        env: UAVMECGymEnv | None = None
+        try:
+            _wait_until_listening(port, process)
+            backend = JavaGymBridgeBackend(
+                port=port,
+                expected_number_of_uavs=2,
+                expected_environment_manifest=environment,
+                expected_git_commit_sha=current_commit_sha(repository),
+                expected_source_tree_sha256=repository_source_sha256(repository),
+            )
+            env = UAVMECGymEnv(2, backend)
+            policies = [RandomMaskedPolicy(2), MinimumEstimatedDelayPolicy(2)]
+            repeated_signatures.append(
+                [
+                    asdict(result)
+                    for policy in policies
+                    for result in evaluate_policy(env, policy, [206, 210])
+                ]
+            )
+        finally:
+            if env is not None:
+                env.close()
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+
+    assert repeated_signatures[1:] == [repeated_signatures[0]] * 2

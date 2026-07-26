@@ -18,9 +18,7 @@
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
         <cloudsim.version>4.0</cloudsim.version>
-        <json.version>20230618</json.version>
-        <slf4j.version>1.7.36</slf4j.version>
-        <logback.version>1.2.11</logback.version>
+        <json.version>20231013</json.version>
         <junit.version>5.9.2</junit.version>
         <commons-math3.version>3.6.1</commons-math3.version>
         <colt.version>1.2.0</colt.version>
@@ -29,73 +27,61 @@
     </properties>
 
     <dependencies>
-        <!-- CloudSim Dependencies -->
+        <!-- CloudSim 4.0 is not reliably published in Maven Central. The exact
+             upstream binary is exposed through the checked-in Maven repository
+             below instead of an unresolvable systemPath. -->
         <dependency>
             <groupId>org.cloudbus.cloudsim</groupId>
-            <artifactId>cloudsim</artifactId>
-            <version>4.0</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/src/main/resources/lib/cloudsim-4.0.jar</systemPath>
-        </dependency>
-        
-        <!-- EdgeCloudSim Dependencies - This might need to be installed locally as it may not be in central repos -->
-        <dependency>
-            <groupId>edu.boun</groupId>
-            <artifactId>edgecloudsim</artifactId>
-            <version>1.0</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/src/main/resources/lib/edgecloudsim-1.0.jar</systemPath>
+            <artifactId>cloudsim-vendored</artifactId>
+            <version>${cloudsim.version}</version>
         </dependency>
         
         <!-- JSON Processing -->
         <dependency>
             <groupId>org.json</groupId>
             <artifactId>json</artifactId>
-            <version>20231013</version>
+            <version>${json.version}</version>
         </dependency>
         
-        <!-- Apache Commons Math - Add this for ExponentialDistribution -->
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-math3</artifactId>
             <version>${commons-math3.version}</version>
         </dependency>
         
-        <!-- CERN Colt Library - Add this for Poisson distribution -->
         <dependency>
             <groupId>colt</groupId>
             <artifactId>colt</artifactId>
             <version>${colt.version}</version>
         </dependency>
         
-        <!-- JFuzzyLogic - 修改为使用系统路径 -->
+        <!-- jFuzzyLogic 1.0 is also vendored as a normal Maven artifact. -->
         <dependency>
             <groupId>net.sourceforge.jfuzzylogic</groupId>
             <artifactId>jfuzzylogic</artifactId>
             <version>${jfuzzylogic.version}</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/src/main/resources/lib/jFuzzyLogic.jar</systemPath>
         </dependency>
         
-        <!-- Weka - 修改为使用系统路径并使用正确的版本 -->
         <dependency>
             <groupId>nz.ac.waikato.cms.weka</groupId>
             <artifactId>weka-stable</artifactId>
             <version>${weka.version}</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/src/main/resources/lib/weka-stable-3.8.0.jar</systemPath>
-        </dependency>
-        
-        <!-- Logging -->
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-            <version>${slf4j.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>ch.qos.logback</groupId>
-            <artifactId>logback-classic</artifactId>
-            <version>${logback.version}</version>
+            <exclusions>
+                <!-- Match the historical lightweight runtime: these optional
+                     native linear-algebra stacks are not used by WekaWrapper. -->
+                <exclusion>
+                    <groupId>com.github.fommil.netlib</groupId>
+                    <artifactId>all</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>net.sourceforge.f2j</groupId>
+                    <artifactId>arpack_combined_all</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.googlecode.netlib-java</groupId>
+                    <artifactId>netlib-java</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         
         <!-- Testing -->
@@ -114,6 +100,14 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <excludes>
+                    <exclude>maven-repository/**</exclude>
+                </excludes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -151,6 +145,7 @@
                         </goals>
                         <configuration>
                             <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                            <includeScope>runtime</includeScope>
                         </configuration>
                     </execution>
                 </executions>
@@ -166,42 +161,24 @@
                 <version>3.0.0</version>
                 <configuration>
                     <mainClass>edu.boun.edgecloudsim.uav.UAVMECMainApp</mainClass>
-                    <additionalClasspathElements>
-                        <additionalClasspathElement>${project.basedir}/src/main/resources/lib/*</additionalClasspathElement>
-                    </additionalClasspathElements>
                     <classpathScope>runtime</classpathScope>
                 </configuration>
-            </plugin>
-            <plugin>
-                <artifactId>maven-assembly-plugin</artifactId>
-                <configuration>
-                    <archive>
-                        <manifest>
-                            <mainClass>edu.boun.edgecloudsim.uav.UAVMECMainApp</mainClass>
-                        </manifest>
-                    </archive>
-                    <descriptorRefs>
-                        <descriptorRef>jar-with-dependencies</descriptorRef>
-                    </descriptorRefs>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>make-assembly</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>single</goal>
-                        </goals>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>
     
-    <!-- 仅保留中央仓库 -->
     <repositories>
         <repository>
-            <id>central</id>
-            <url>https://repo.maven.apache.org/maven2</url>
+            <id>vendored-upstream-artifacts</id>
+            <name>Checksummed upstream artifacts absent from Maven Central</name>
+            <url>file://${project.basedir}/src/main/resources/maven-repository</url>
+            <releases>
+                <enabled>true</enabled>
+                <checksumPolicy>fail</checksumPolicy>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
         </repository>
     </repositories>
     

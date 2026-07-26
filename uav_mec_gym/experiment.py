@@ -20,10 +20,13 @@ import gymnasium as gym
 import numpy as np
 
 from .backend import JavaGymBridgeBackend
-from .contract import UAVMECGymEnv
+from .contract import PROTOCOL_VERSION, UAVMECGymEnv
 from .evaluation import (
+    AUDIT_STEP_METRICS,
     PHYSICAL_STEP_METRICS,
+    CloudOnlyPolicy,
     EpisodeResult,
+    LocalOnlyPolicy,
     MinimumEstimatedDelayPolicy,
     RandomMaskedPolicy,
     evaluate_policy,
@@ -32,26 +35,45 @@ from .evaluation import (
     summarize_values,
 )
 from .ppo import MixedActionPPO, PPOConfig
+from .td3 import MixedActionTD3, TD3Config
+from .ddpg import DDPGConfig, MixedActionDDPG
+from .dqn import DQNConfig, MaskedDQN
 
 
-RESULT_FORMAT_VERSION = 2
+RESULT_FORMAT_VERSION = 3
 MIN_PAIRED_SEEDS = 5
 SUMMARY_METRICS = (
     "total_reward",
     "steps",
     "settled_tasks",
     "successful_tasks",
+    "deadline_success_rate",
+    "latency_p95_seconds",
+    "throughput_tasks_per_second",
     "simulation_time",
     "physical_metric_sums.latency_seconds",
     "physical_metric_sums.ue_energy_joules",
     "physical_metric_sums.uav_energy_joules",
     "physical_metric_sums.constraint_violations",
+    "audit_metric_means.uav_queue_length_total",
+    "audit_metric_maxima.uav_queue_length_max",
+    "audit_metric_means.local_resource_utilization",
+    "audit_metric_means.cloud_resource_utilization",
+    "audit_metric_means.uav_resource_utilization",
+    "target_ratios.local",
+    "target_ratios.cloud",
+    "target_ratios.uav",
+    "target_ratios.offloaded",
 )
 
 
 def canonical_hash(value: Any) -> str:
     encoded = json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -136,6 +158,53 @@ def _reward_components(info: Mapping[str, Any]) -> dict[str, float]:
     return components
 
 
+def _latency_samples(info: Mapping[str, Any]) -> list[float]:
+    raw = info.get("settled_task_latencies_seconds")
+    if not isinstance(raw, list):
+        raise ValueError("GymBridge omitted settled_task_latencies_seconds")
+    values = [float(value) for value in raw]
+    if (
+        len(values) != int(info.get("settled_in_transition", -1))
+        or not np.isfinite(values).all()
+        or any(value < 0.0 for value in values)
+    ):
+        raise ValueError("GymBridge returned invalid task latency samples")
+    return values
+
+
+def _smdp_audit_metrics(info: Mapping[str, Any]) -> dict[str, float | int]:
+    nonnegative = (
+        "elapsed_simulation_time",
+        "throughput_tasks_per_second",
+        "uav_queue_length_total",
+        "uav_queue_length_max",
+        "active_access_uploads",
+        "active_access_downloads",
+        "active_backhaul_uploads",
+        "active_backhaul_downloads",
+        "local_resource_utilization",
+        "cloud_resource_utilization",
+        "uav_resource_utilization",
+    )
+    audit: dict[str, float | int] = {}
+    for key in nonnegative:
+        value = float(info[key])
+        if not np.isfinite(value) or value < 0.0:
+            raise ValueError(f"Invalid GymBridge audit metric {key}: {value}")
+        if key.endswith("_utilization") and value > 1.0:
+            raise ValueError(f"GymBridge resource utilization exceeds one: {key}")
+        audit[key] = value
+    discount = float(info["effective_discount"])
+    if not np.isfinite(discount) or not 0.0 <= discount <= 1.0:
+        raise ValueError("GymBridge effective_discount must lie in [0, 1]")
+    audit["effective_discount"] = discount
+    relay = int(info["selected_cloud_relay_uav"])
+    if relay < -1:
+        raise ValueError("GymBridge returned an invalid cloud relay UAV ID")
+    audit["selected_cloud_relay_uav"] = relay
+    return audit
+
+
 def _finalize_training_episode(
     *,
     seed: int,
@@ -148,11 +217,19 @@ def _finalize_training_episode(
     last = step_rows[-1]
     component_sums: dict[str, float] = {}
     physical_sums = {key: 0.0 for key in PHYSICAL_STEP_METRICS}
+    latency_samples: list[float] = []
     for row in step_rows:
         for key, value in row["reward_components"].items():
             component_sums[key] = component_sums.get(key, 0.0) + float(value)
         for key, value in row["physical_metrics"].items():
             physical_sums[key] += float(value)
+        latency_samples.extend(row["latency_samples_seconds"])
+    exponential_observation_count = sum(
+        int(row["exponential_observation_count"]) for row in step_rows
+    )
+    exponential_saturation_count = sum(
+        int(row["exponential_saturation_count"]) for row in step_rows
+    )
     settled = int(last["settled_tasks"])
     successful_value = float(component_sums.get("success", 0.0))
     if successful_value < 0.0 or not np.isclose(
@@ -174,12 +251,27 @@ def _finalize_training_episode(
         "settled_tasks": settled,
         "total_tasks": int(last["total_tasks"]),
         "successful_tasks": successful,
+        "deadline_success_rate": successful / settled if settled else 0.0,
+        "latency_p95_seconds": (
+            float(np.percentile(latency_samples, 95.0))
+            if latency_samples
+            else 0.0
+        ),
+        "latency_samples_seconds": latency_samples,
+        "throughput_tasks_per_second": successful / simulation_time,
         "simulation_time": simulation_time,
         "reward_component_sums": component_sums,
         "physical_metric_sums": physical_sums,
         "physical_metric_means": {
             key: value / len(step_rows) for key, value in physical_sums.items()
         },
+        "exponential_observation_count": exponential_observation_count,
+        "exponential_saturation_count": exponential_saturation_count,
+        "exponential_saturation_rate": (
+            exponential_saturation_count / exponential_observation_count
+            if exponential_observation_count
+            else 0.0
+        ),
         "transitions": step_rows,
     }
 
@@ -223,12 +315,16 @@ def train_ppo(
         episode_truncated = False
 
         while not (episode_terminated or episode_truncated):
+            exponential = np.asarray(observation["task"][:3], dtype=np.float64)
+            if not np.isfinite(exponential).all():
+                raise ValueError("Non-finite exponential task observation")
             sample = agent.sample_action(
                 observation, deterministic=False, update_normalizer=True
             )
             next_observation, reward, terminated, truncated, info = env.step(
                 sample.action
             )
+            smdp_audit = _smdp_audit_metrics(info)
             global_step = int(agent.training_steps)
             # store_transition advances the authoritative cumulative counter.
             # Compute the row index and budget boundary from that post-store
@@ -245,6 +341,7 @@ def train_ppo(
                 next_observation,
                 bool(terminated),
                 learning_truncated,
+                discount=float(smdp_audit["effective_discount"]),
             )
             global_step = int(agent.training_steps)
             if global_step != expected_global_step:
@@ -252,6 +349,7 @@ def train_ppo(
 
             physical = _physical_step_metrics(info)
             components = _reward_components(info)
+            latency_samples = _latency_samples(info)
             step_rows.append(
                 {
                     "global_step": global_step,
@@ -270,6 +368,12 @@ def train_ppo(
                     "simulation_time": float(info["simulation_time"]),
                     "reward_components": components,
                     "physical_metrics": physical,
+                    "latency_samples_seconds": latency_samples,
+                    "smdp_audit": smdp_audit,
+                    "exponential_observation_count": int(exponential.size),
+                    "exponential_saturation_count": int(
+                        np.count_nonzero(exponential >= 1.0)
+                    ),
                 }
             )
             if len(agent.buffer) >= agent.config.rollout_steps:
@@ -299,6 +403,126 @@ def train_ppo(
     return episodes, updates
 
 
+def train_replay_agent(
+    env: gym.Env,
+    agent: Any,
+    *,
+    interaction_budget: int,
+    training_seed_start: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Train a replay-buffer agent to a cumulative interaction target."""
+
+    if interaction_budget <= 0:
+        raise ValueError("interaction_budget must be positive")
+    starting_training_steps = int(agent.training_steps)
+    if interaction_budget <= starting_training_steps:
+        raise ValueError(
+            "interaction_budget is a cumulative target and must exceed the "
+            f"checkpoint's {starting_training_steps} training steps"
+        )
+    episodes: list[dict[str, Any]] = []
+    updates: list[dict[str, Any]] = []
+
+    while agent.training_steps < interaction_budget:
+        seed = agent.reserve_training_episode_seed(training_seed_start)
+        observation, reset_info = env.reset(seed=seed)
+        if int(reset_info.get("seed", seed)) != seed:
+            raise ValueError("GymBridge reset did not echo the requested seed")
+        step_rows: list[dict[str, Any]] = []
+        episode_terminated = False
+        episode_truncated = False
+
+        while not (episode_terminated or episode_truncated):
+            exponential = np.asarray(observation["task"][:3], dtype=np.float64)
+            if not np.isfinite(exponential).all():
+                raise ValueError("Non-finite exponential task observation")
+            sample = agent.sample_action(
+                observation, deterministic=False, update_normalizer=True
+            )
+            next_observation, reward, terminated, truncated, info = env.step(
+                sample.action
+            )
+            smdp_audit = _smdp_audit_metrics(info)
+            expected_global_step = int(agent.training_steps) + 1
+            budget_truncated = (
+                expected_global_step >= interaction_budget
+                and not (terminated or truncated)
+            )
+            learning_truncated = bool(truncated or budget_truncated)
+            agent.store_transition(
+                sample,
+                float(reward),
+                next_observation,
+                bool(terminated),
+                learning_truncated,
+                discount=float(smdp_audit["effective_discount"]),
+            )
+            global_step = int(agent.training_steps)
+            if global_step != expected_global_step:
+                raise AssertionError("Replay-agent training step counter did not advance once")
+            update = agent.update()
+            if update is not None:
+                updates.append(update)
+
+            physical = _physical_step_metrics(info)
+            components = _reward_components(info)
+            latency_samples = _latency_samples(info)
+            step_rows.append(
+                {
+                    "global_step": global_step,
+                    "reward": float(reward),
+                    "target": int(sample.action["target"]),
+                    "movement": np.asarray(
+                        sample.action["movement"], dtype=np.float32
+                    ).tolist(),
+                    "exploration": (
+                        {"warmup_random": bool(sample.warmup_random)}
+                        if hasattr(sample, "warmup_random")
+                        else {"epsilon": float(sample.epsilon)}
+                    ),
+                    "warmup_random": bool(
+                        getattr(sample, "warmup_random", False)
+                    ),
+                    "terminated": bool(terminated),
+                    "truncated": learning_truncated,
+                    "environment_truncated": bool(truncated),
+                    "interaction_budget_truncated": budget_truncated,
+                    "settled_tasks": int(info["settled_tasks"]),
+                    "total_tasks": int(info["total_tasks"]),
+                    "simulation_time": float(info["simulation_time"]),
+                    "reward_components": components,
+                    "physical_metrics": physical,
+                    "latency_samples_seconds": latency_samples,
+                    "smdp_audit": smdp_audit,
+                    "exponential_observation_count": int(exponential.size),
+                    "exponential_saturation_count": int(
+                        np.count_nonzero(exponential >= 1.0)
+                    ),
+                }
+            )
+            observation = next_observation
+            episode_terminated = bool(terminated)
+            episode_truncated = learning_truncated
+
+        episodes.append(
+            _finalize_training_episode(
+                seed=seed,
+                step_rows=step_rows,
+                terminated=episode_terminated,
+                truncated=episode_truncated,
+            )
+        )
+
+    if agent.training_steps != interaction_budget:
+        raise AssertionError(
+            "Replay-agent training step counter diverged from cumulative interaction target"
+        )
+    return episodes, updates
+
+
+train_td3 = train_replay_agent
+
+
 def audit_episode_results(results: Iterable[EpisodeResult]) -> None:
     rows = list(results)
     if not rows:
@@ -312,6 +536,18 @@ def audit_episode_results(results: Iterable[EpisodeResult]) -> None:
             raise ValueError("Evaluation task counts are inconsistent")
         if result.simulation_time <= 0.0:
             raise ValueError("Evaluation lost the terminal simulation clock")
+        if not np.isclose(
+            result.throughput_tasks_per_second,
+            result.successful_tasks / result.simulation_time,
+        ):
+            raise ValueError("Evaluation throughput disagrees with task counts")
+        if not np.isclose(
+            result.deadline_success_rate,
+            result.successful_tasks / max(result.settled_tasks, 1),
+        ):
+            raise ValueError("Evaluation deadline success rate is inconsistent")
+        if len(result.latency_samples_seconds) != result.settled_tasks:
+            raise ValueError("Evaluation task latency samples are incomplete")
         if not result.settled_tasks <= result.steps <= result.total_tasks:
             raise ValueError("Arrival decisions and settled task counts are inconsistent")
         if result.terminated and result.steps != result.total_tasks:
@@ -325,15 +561,61 @@ def audit_episode_results(results: Iterable[EpisodeResult]) -> None:
             value = float(result.physical_metric_sums[key])
             if not np.isfinite(value) or value < 0.0:
                 raise ValueError(f"Invalid episode physical metric {key}")
+        expected_audit_metrics = set(AUDIT_STEP_METRICS)
+        if set(result.audit_metric_means) != expected_audit_metrics:
+            raise ValueError("Evaluation audit metric means are incomplete")
+        if set(result.audit_metric_maxima) != expected_audit_metrics:
+            raise ValueError("Evaluation audit metric maxima are incomplete")
+        for key in expected_audit_metrics:
+            mean = float(result.audit_metric_means[key])
+            maximum = float(result.audit_metric_maxima[key])
+            if not np.isfinite(mean) or not np.isfinite(maximum):
+                raise ValueError(f"Non-finite episode audit metric {key}")
+            if mean < 0.0 or (
+                maximum < mean
+                and not np.isclose(maximum, mean, rtol=1e-12, atol=1e-15)
+            ):
+                raise ValueError(f"Inconsistent episode audit metric {key}")
+            if key.endswith("_utilization") and maximum > 1.0:
+                raise ValueError(f"Resource utilization exceeds one: {key}")
+        if sum(result.target_counts.values()) != result.steps:
+            raise ValueError("Target counts do not match decision steps")
+        if not np.isclose(
+            sum(result.target_ratios[key] for key in ("local", "cloud", "uav")),
+            1.0,
+        ):
+            raise ValueError("Target ratios do not sum to one")
+        if not np.isclose(
+            result.target_ratios["offloaded"],
+            result.target_ratios["cloud"] + result.target_ratios["uav"],
+        ):
+            raise ValueError("Offload ratio is inconsistent")
+        if (
+            result.exponential_observation_count != result.steps * 3
+            or not 0
+            <= result.exponential_saturation_count
+            <= result.exponential_observation_count
+        ):
+            raise ValueError("Exponential observation counts are inconsistent")
+        if not np.isclose(
+            result.exponential_saturation_rate,
+            result.exponential_saturation_count
+            / max(result.exponential_observation_count, 1),
+        ):
+            raise ValueError("Exponential saturation rate is inconsistent")
 
 
 def _policy_configuration(policy: Any) -> dict[str, Any]:
-    if isinstance(policy, MixedActionPPO):
+    if isinstance(policy, (MixedActionPPO, MixedActionDDPG, MaskedDQN, MixedActionTD3)):
         return asdict(policy.config)
     if isinstance(policy, RandomMaskedPolicy):
         return {"target": "uniform_over_action_mask", "movement": "uniform_-1_1"}
     if isinstance(policy, MinimumEstimatedDelayPolicy):
         return {"target": "minimum_observable_transfer_delay", "movement": "zero"}
+    if isinstance(policy, LocalOnlyPolicy):
+        return {"target": "local_even_if_masked", "movement": "zero"}
+    if isinstance(policy, CloudOnlyPolicy):
+        return {"target": "cloud_even_if_masked", "movement": "zero"}
     raise TypeError(f"Unsupported policy type: {type(policy).__name__}")
 
 
@@ -353,8 +635,15 @@ def build_fair_evaluation_report(
         raise ValueError("Fair evaluation requires at least five unique paired seeds")
     if split not in {"validation", "heldout"}:
         raise ValueError("split must be validation or heldout")
-    if not policies or not any(isinstance(policy, MixedActionPPO) for policy in policies):
-        raise ValueError("Fair evaluation must include the migrated PPO policy")
+    candidates = [
+        policy
+        for policy in policies
+        if isinstance(policy, (MixedActionPPO, MixedActionDDPG, MaskedDQN, MixedActionTD3))
+    ]
+    if len(candidates) != 1:
+        raise ValueError("Fair evaluation must include exactly one learned candidate")
+    candidate = candidates[0]
+    candidate_name = candidate.name
 
     checkpoint = Path(checkpoint_path)
     checkpoint_hash = file_sha256(checkpoint)
@@ -373,7 +662,9 @@ def build_fair_evaluation_report(
         config = algorithm_configs[policy_name]
         policy = next(item for item in policies if item.name == policy_name)
         training_interactions = (
-            int(policy.training_steps) if isinstance(policy, MixedActionPPO) else 0
+            int(policy.training_steps)
+        if isinstance(policy, (MixedActionPPO, MixedActionDDPG, MaskedDQN, MixedActionTD3))
+            else 0
         )
         for result in results:
             row = asdict(result)
@@ -383,9 +674,9 @@ def build_fair_evaluation_report(
                     "algorithm_config": config,
                     "algorithm_config_hash": canonical_hash(config),
                     "environment_config_hash": environment["sha256"],
-                    "checkpoint": str(checkpoint) if policy_name == "mixed_action_ppo" else None,
+                    "checkpoint": str(checkpoint) if policy_name == candidate_name else None,
                     "checkpoint_sha256": checkpoint_hash
-                    if policy_name == "mixed_action_ppo"
+                    if policy_name == candidate_name
                     else None,
                     "training_interactions": training_interactions,
                     "git_commit_sha": commit_sha,
@@ -407,15 +698,15 @@ def build_fair_evaluation_report(
         )
         summaries[policy_name] = policy_summary
 
-    ppo_results = results_by_policy["mixed_action_ppo"]
+    candidate_results = results_by_policy[candidate_name]
     paired: dict[str, Any] = {}
     for reference_name, reference_results in results_by_policy.items():
-        if reference_name == "mixed_action_ppo":
+        if reference_name == candidate_name:
             continue
         paired[reference_name] = {
             metric: asdict(
                 summarize_paired_seed_differences(
-                    reference_results, ppo_results, metric
+                    reference_results, candidate_results, metric
                 )
             )
             for metric in SUMMARY_METRICS
@@ -423,6 +714,7 @@ def build_fair_evaluation_report(
 
     return {
         "format_version": RESULT_FORMAT_VERSION,
+        "protocol_version": PROTOCOL_VERSION,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "split": split,
         "paired_seeds": unique_seeds,
@@ -437,7 +729,7 @@ def build_fair_evaluation_report(
         },
         "training_interactions": {
             policy.name: int(policy.training_steps)
-            if isinstance(policy, MixedActionPPO)
+            if isinstance(policy, (MixedActionPPO, MixedActionDDPG, MaskedDQN, MixedActionTD3))
             else 0
             for policy in policies
         },
@@ -455,7 +747,12 @@ def build_fair_evaluation_report(
                 "terminal simulation time is positive",
                 "raw physical metrics are finite and non-negative",
             ],
-            "interpretation": "descriptive smoke evidence; no superiority claim",
+            "interpretation": (
+                "formal paired evaluation with uncertainty; claims still require "
+                "independent training-seed replication"
+                if len(unique_seeds) >= 10 and int(candidate.training_steps) >= 1024
+                else "descriptive smoke evidence; no superiority claim"
+            ),
         },
     }
 
@@ -463,7 +760,13 @@ def build_fair_evaluation_report(
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True),
+        json.dumps(
+            payload,
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+        ),
         encoding="utf-8",
     )
 
@@ -480,11 +783,13 @@ def _add_shared_bridge_arguments(parser: argparse.ArgumentParser) -> None:
         help="Exact XML files used to launch this GymBridge server",
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--formal-experiment-id")
+    parser.add_argument("--formal-config-sha256")
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Train and fairly evaluate mixed-action PPO on GymBridge"
+        description="Train and fairly evaluate mixed-action RL on GymBridge"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -521,9 +826,96 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-bootstrap-truncated", action="store_true"
     )
 
+    ddpg_parser = subparsers.add_parser("train-ddpg")
+    _add_shared_bridge_arguments(ddpg_parser)
+    ddpg_parser.add_argument("--checkpoint", type=Path, required=True)
+    ddpg_parser.add_argument("--resume-from", type=Path)
+    ddpg_parser.add_argument("--interaction-budget", type=int, required=True)
+    ddpg_parser.add_argument("--training-seed-start", type=int, required=True)
+    ddpg_parser.add_argument(
+        "--validation-seeds", type=int, nargs="+", default=list(range(201, 211))
+    )
+    ddpg_parser.add_argument(
+        "--heldout-seeds", type=int, nargs="+", default=list(range(301, 311))
+    )
+    ddpg_parser.add_argument("--batch-size", type=int, default=256)
+    ddpg_parser.add_argument("--replay-capacity", type=int, default=100_000)
+    ddpg_parser.add_argument("--learning-starts", type=int, default=1_000)
+    ddpg_parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[256, 256])
+    ddpg_parser.add_argument("--actor-learning-rate", type=float, default=3e-4)
+    ddpg_parser.add_argument("--critic-learning-rate", type=float, default=3e-4)
+    ddpg_parser.add_argument("--exploration-noise", type=float, default=0.1)
+    ddpg_parser.add_argument("--discrete-exploration", type=float, default=0.1)
+    ddpg_parser.add_argument("--target-temperature", type=float, default=1.0)
+    ddpg_parser.add_argument("--no-bootstrap-truncated", action="store_true")
+
+    dqn_parser = subparsers.add_parser("train-dqn")
+    _add_shared_bridge_arguments(dqn_parser)
+    dqn_parser.add_argument("--checkpoint", type=Path, required=True)
+    dqn_parser.add_argument("--resume-from", type=Path)
+    dqn_parser.add_argument("--interaction-budget", type=int, required=True)
+    dqn_parser.add_argument("--training-seed-start", type=int, required=True)
+    dqn_parser.add_argument(
+        "--validation-seeds", type=int, nargs="+", default=list(range(201, 211))
+    )
+    dqn_parser.add_argument(
+        "--heldout-seeds", type=int, nargs="+", default=list(range(301, 311))
+    )
+    dqn_parser.add_argument("--batch-size", type=int, default=256)
+    dqn_parser.add_argument("--replay-capacity", type=int, default=100_000)
+    dqn_parser.add_argument("--learning-starts", type=int, default=1_000)
+    dqn_parser.add_argument("--target-update-interval", type=int, default=250)
+    dqn_parser.add_argument("--epsilon-start", type=float, default=1.0)
+    dqn_parser.add_argument("--epsilon-end", type=float, default=0.05)
+    dqn_parser.add_argument("--epsilon-decay-steps", type=int, default=10_000)
+    dqn_parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[256, 256])
+    dqn_parser.add_argument("--learning-rate", type=float, default=3e-4)
+    dqn_parser.add_argument("--no-bootstrap-truncated", action="store_true")
+
+    td3_parser = subparsers.add_parser("train-td3")
+    _add_shared_bridge_arguments(td3_parser)
+    td3_parser.add_argument("--checkpoint", type=Path, required=True)
+    td3_parser.add_argument(
+        "--resume-from",
+        type=Path,
+        help=(
+            "TD3 checkpoint to continue; its algorithm config, replay, and RNG "
+            "state are authoritative"
+        ),
+    )
+    td3_parser.add_argument(
+        "--interaction-budget",
+        type=int,
+        required=True,
+        help="Cumulative target for agent.training_steps",
+    )
+    td3_parser.add_argument("--training-seed-start", type=int, required=True)
+    td3_parser.add_argument(
+        "--validation-seeds", type=int, nargs="+", default=list(range(201, 211))
+    )
+    td3_parser.add_argument(
+        "--heldout-seeds", type=int, nargs="+", default=list(range(301, 311))
+    )
+    td3_parser.add_argument("--batch-size", type=int, default=256)
+    td3_parser.add_argument("--replay-capacity", type=int, default=100_000)
+    td3_parser.add_argument("--learning-starts", type=int, default=1_000)
+    td3_parser.add_argument("--policy-delay", type=int, default=2)
+    td3_parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[256, 256])
+    td3_parser.add_argument("--actor-learning-rate", type=float, default=3e-4)
+    td3_parser.add_argument("--critic-learning-rate", type=float, default=3e-4)
+    td3_parser.add_argument("--policy-noise", type=float, default=0.2)
+    td3_parser.add_argument("--noise-clip", type=float, default=0.5)
+    td3_parser.add_argument("--exploration-noise", type=float, default=0.1)
+    td3_parser.add_argument("--discrete-exploration", type=float, default=0.1)
+    td3_parser.add_argument("--target-temperature", type=float, default=1.0)
+    td3_parser.add_argument("--no-bootstrap-truncated", action="store_true")
+
     evaluate_parser = subparsers.add_parser("evaluate")
     _add_shared_bridge_arguments(evaluate_parser)
     evaluate_parser.add_argument("--checkpoint", type=Path, required=True)
+    evaluate_parser.add_argument(
+        "--algorithm", choices=["ddpg", "ppo", "dqn", "td3"], default="ppo"
+    )
     evaluate_parser.add_argument("--split", choices=["validation", "heldout"], required=True)
     evaluate_parser.add_argument(
         "--seeds", type=int, nargs="+", required=True
@@ -533,6 +925,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _build_parser().parse_args()
+    if (args.formal_experiment_id is None) != (
+        args.formal_config_sha256 is None
+    ):
+        raise ValueError(
+            "formal experiment ID and config SHA-256 must be supplied together"
+        )
+    formal_experiment = None
+    if args.formal_experiment_id is not None:
+        if len(args.formal_config_sha256) != 64:
+            raise ValueError("formal config SHA-256 must contain 64 hex characters")
+        try:
+            int(args.formal_config_sha256, 16)
+        except ValueError as exc:
+            raise ValueError(
+                "formal config SHA-256 must contain 64 hex characters"
+            ) from exc
+        formal_experiment = {
+            "experiment_id": args.formal_experiment_id,
+            "config_sha256": args.formal_config_sha256,
+        }
     environment = environment_manifest(args.environment_config)
     repository = Path(__file__).resolve().parents[1]
     commit_sha = current_commit_sha(repository)
@@ -547,18 +959,24 @@ def main() -> None:
     )
     env = UAVMECGymEnv(args.uavs, backend)
     try:
-        if args.command == "train-ppo":
+        if args.command in {"train-ddpg", "train-ppo", "train-dqn", "train-td3"}:
             resume_source: dict[str, str] | None = None
             if args.resume_from is not None:
                 resume_source = {
                     "path": str(args.resume_from),
                     "sha256": file_sha256(args.resume_from),
                 }
-                agent = MixedActionPPO.load_checkpoint(args.resume_from)
+                loaders = {
+                    "train-ddpg": MixedActionDDPG.load_checkpoint,
+                    "train-ppo": MixedActionPPO.load_checkpoint,
+                    "train-dqn": MaskedDQN.load_checkpoint,
+                    "train-td3": MixedActionTD3.load_checkpoint,
+                }
+                agent = loaders[args.command](args.resume_from)
                 if agent.number_of_uavs != args.uavs:
                     raise ValueError("Checkpoint UAV count does not match GymBridge")
                 config = agent.config
-            else:
+            elif args.command == "train-ppo":
                 config = PPOConfig(
                     rollout_steps=args.rollout_steps,
                     minibatch_size=args.minibatch_size,
@@ -570,8 +988,60 @@ def main() -> None:
                 agent = MixedActionPPO(
                     args.uavs, config=config, seed=args.training_seed_start
                 )
+            elif args.command == "train-ddpg":
+                config = DDPGConfig(
+                    batch_size=args.batch_size,
+                    replay_capacity=args.replay_capacity,
+                    learning_starts=args.learning_starts,
+                    hidden_sizes=tuple(args.hidden_sizes),
+                    actor_learning_rate=args.actor_learning_rate,
+                    critic_learning_rate=args.critic_learning_rate,
+                    exploration_noise=args.exploration_noise,
+                    discrete_exploration=args.discrete_exploration,
+                    target_temperature=args.target_temperature,
+                    bootstrap_truncated=not args.no_bootstrap_truncated,
+                )
+                agent = MixedActionDDPG(
+                    args.uavs, config=config, seed=args.training_seed_start
+                )
+            elif args.command == "train-dqn":
+                config = DQNConfig(
+                    batch_size=args.batch_size,
+                    replay_capacity=args.replay_capacity,
+                    learning_starts=args.learning_starts,
+                    target_update_interval=args.target_update_interval,
+                    epsilon_start=args.epsilon_start,
+                    epsilon_end=args.epsilon_end,
+                    epsilon_decay_steps=args.epsilon_decay_steps,
+                    hidden_sizes=tuple(args.hidden_sizes),
+                    learning_rate=args.learning_rate,
+                    bootstrap_truncated=not args.no_bootstrap_truncated,
+                )
+                agent = MaskedDQN(
+                    args.uavs, config=config, seed=args.training_seed_start
+                )
+            else:
+                config = TD3Config(
+                    batch_size=args.batch_size,
+                    replay_capacity=args.replay_capacity,
+                    learning_starts=args.learning_starts,
+                    policy_delay=args.policy_delay,
+                    hidden_sizes=tuple(args.hidden_sizes),
+                    actor_learning_rate=args.actor_learning_rate,
+                    critic_learning_rate=args.critic_learning_rate,
+                    policy_noise=args.policy_noise,
+                    noise_clip=args.noise_clip,
+                    exploration_noise=args.exploration_noise,
+                    discrete_exploration=args.discrete_exploration,
+                    target_temperature=args.target_temperature,
+                    bootstrap_truncated=not args.no_bootstrap_truncated,
+                )
+                agent = MixedActionTD3(
+                    args.uavs, config=config, seed=args.training_seed_start
+                )
             starting_training_interactions = int(agent.training_steps)
-            episodes, updates = train_ppo(
+            training_function = train_ppo if args.command == "train-ppo" else train_replay_agent
+            episodes, updates = training_function(
                 env,
                 agent,
                 interaction_budget=args.interaction_budget,
@@ -579,7 +1049,7 @@ def main() -> None:
             )
             used_training_seeds_this_run = [episode["seed"] for episode in episodes]
             if agent.training_seed_start is None or agent.next_training_seed is None:
-                raise AssertionError("PPO training seed cursor was not recorded")
+                raise AssertionError("training seed cursor was not recorded")
             used_training_seeds = list(
                 range(agent.training_seed_start, agent.next_training_seed)
             )
@@ -602,10 +1072,12 @@ def main() -> None:
             config_dict = asdict(config)
             payload = {
                 "format_version": RESULT_FORMAT_VERSION,
+                "protocol_version": PROTOCOL_VERSION,
                 "generated_at_utc": datetime.now(timezone.utc).isoformat(),
                 "algorithm": agent.name,
                 "algorithm_config": config_dict,
                 "algorithm_config_hash": canonical_hash(config_dict),
+                "formal_experiment": formal_experiment,
                 "environment": environment,
                 "service_provenance": backend.provenance,
                 "git_commit_sha": commit_sha,
@@ -633,12 +1105,20 @@ def main() -> None:
             }
             _write_json(args.output, payload)
         else:
-            agent = MixedActionPPO.load_checkpoint(args.checkpoint)
+            loaders = {
+                "ddpg": MixedActionDDPG.load_checkpoint,
+                "ppo": MixedActionPPO.load_checkpoint,
+                "dqn": MaskedDQN.load_checkpoint,
+                "td3": MixedActionTD3.load_checkpoint,
+            }
+            agent = loaders[args.algorithm](args.checkpoint)
             if agent.number_of_uavs != args.uavs:
                 raise ValueError("Checkpoint UAV count does not match GymBridge")
             policies = [
                 RandomMaskedPolicy(args.uavs),
                 MinimumEstimatedDelayPolicy(args.uavs),
+                LocalOnlyPolicy(args.uavs),
+                CloudOnlyPolicy(args.uavs),
                 agent,
             ]
             report = build_fair_evaluation_report(
@@ -651,6 +1131,7 @@ def main() -> None:
                 checkpoint_path=args.checkpoint,
                 service_provenance=backend.provenance,
             )
+            report["formal_experiment"] = formal_experiment
             _write_json(args.output, report)
     finally:
         env.close()

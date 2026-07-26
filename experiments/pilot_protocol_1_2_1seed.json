@@ -1,0 +1,80 @@
+{
+  "format_version": 1,
+  "experiment_id": "pilot_protocol_1_2_1seed_v2",
+  "protocol_version": "1.2",
+  "number_of_uavs": 1,
+  "mobile_devices": 20,
+  "interaction_budget": 512,
+  "port": 12472,
+  "output_root": "results/pilot/protocol_1_2_1seed_v2",
+  "environment": [
+    "src/main/resources/config/pilot/simulation_settings.xml",
+    "src/main/resources/config/pilot/edge_devices.xml",
+    "src/main/resources/config/pilot/applications.xml"
+  ],
+  "training_seed_start": 410001,
+  "evaluation_seeds": [401, 402, 403, 404, 405],
+  "heldout_seeds_reserved": [501, 502, 503, 504, 505],
+  "exponential_saturation_rate_limit": 0.015,
+  "algorithms": {
+    "masked_parameterized_action_ddpg": {
+      "command": "train-ddpg",
+      "evaluation_algorithm": "ddpg",
+      "arguments": {
+        "batch-size": 32,
+        "replay-capacity": 1024,
+        "learning-starts": 64,
+        "hidden-sizes": [32, 32],
+        "actor-learning-rate": 0.0003,
+        "critic-learning-rate": 0.0003,
+        "exploration-noise": 0.1,
+        "discrete-exploration": 0.1,
+        "target-temperature": 1.0
+      }
+    },
+    "mixed_action_ppo": {
+      "command": "train-ppo",
+      "evaluation_algorithm": "ppo",
+      "arguments": {
+        "rollout-steps": 64,
+        "minibatch-size": 32,
+        "update-epochs": 2,
+        "hidden-sizes": [32, 32],
+        "learning-rate": 0.0003
+      }
+    },
+    "mixed_action_td3": {
+      "command": "train-td3",
+      "evaluation_algorithm": "td3",
+      "arguments": {
+        "batch-size": 32,
+        "replay-capacity": 1024,
+        "learning-starts": 64,
+        "policy-delay": 2,
+        "hidden-sizes": [32, 32],
+        "actor-learning-rate": 0.0003,
+        "critic-learning-rate": 0.0003,
+        "policy-noise": 0.2,
+        "noise-clip": 0.5,
+        "exploration-noise": 0.1,
+        "discrete-exploration": 0.1,
+        "target-temperature": 1.0
+      }
+    },
+    "masked_dqn_zero_movement": {
+      "command": "train-dqn",
+      "evaluation_algorithm": "dqn",
+      "arguments": {
+        "batch-size": 32,
+        "replay-capacity": 1024,
+        "learning-starts": 64,
+        "target-update-interval": 64,
+        "epsilon-start": 1.0,
+        "epsilon-end": 0.05,
+        "epsilon-decay-steps": 512,
+        "hidden-sizes": [32, 32],
+        "learning-rate": 0.0003
+      }
+    }
+  }
+}

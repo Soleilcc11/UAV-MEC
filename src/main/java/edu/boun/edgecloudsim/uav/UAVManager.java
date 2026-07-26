@@ -24,6 +24,7 @@ public class UAVManager {
     private Random random;
     private AtomicInteger completedTasks;
     private Map<String, Task> activeEdgeTasks;
+    private Map<String, Integer> activeEdgeTaskUavIds;
     private int movementCommandCount;
     private int boundaryConstraintCount;
     
@@ -40,6 +41,7 @@ public class UAVManager {
         this.random = new Random(42); // 固定随机种子以实现可重复的模拟
         this.completedTasks = new AtomicInteger(0);
         this.activeEdgeTasks = new HashMap<>();
+        this.activeEdgeTaskUavIds = new HashMap<>();
         
         // 在构造函数中初始化，因为simManager还没有完全设置好
     }
@@ -170,6 +172,10 @@ public class UAVManager {
             for (UAV.Task task : newCompletedTasks) {
                 handleUAVTaskCompletedEvent(task);
             }
+
+            if (uav.getEnergy() <= 0) {
+                failActiveEdgeTasks(uav);
+            }
         }
         
         // 记录并返回新完成的任务数量
@@ -207,6 +213,7 @@ public class UAVManager {
         
         Task edgeTask = activeEdgeTasks.remove(task.getId());
         if (edgeTask != null) {
+            activeEdgeTaskUavIds.remove(task.getId());
             if (simManager.getMobileDeviceManager() instanceof DefaultMobileDeviceManager) {
                 ((DefaultMobileDeviceManager) simManager.getMobileDeviceManager())
                         .uavTaskCompleted(edgeTask);
@@ -384,6 +391,9 @@ public class UAVManager {
 
     /** Submit an EdgeCloudSim task to a concrete UAV resource. */
     public boolean submitEdgeTask(int uavId, Task edgeTask) {
+        if (edgeTask == null) {
+            return false;
+        }
         String internalId = "edgecloudsim-" + edgeTask.getCloudletId();
         UAV.Task uavTask = new UAV.Task(
                 internalId,
@@ -393,7 +403,40 @@ public class UAVManager {
             return false;
         }
         activeEdgeTasks.put(internalId, edgeTask);
+        activeEdgeTaskUavIds.put(internalId, uavId);
         return true;
+    }
+
+    private void failActiveEdgeTasks(UAV uav) {
+        List<String> failedTaskIds = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : activeEdgeTaskUavIds.entrySet()) {
+            if (entry.getValue() == uav.getId()) {
+                failedTaskIds.add(entry.getKey());
+            }
+        }
+        for (String taskId : failedTaskIds) {
+            uav.cancelTask(taskId);
+            activeEdgeTaskUavIds.remove(taskId);
+            Task edgeTask = activeEdgeTasks.remove(taskId);
+            if (edgeTask == null) {
+                continue;
+            }
+            SimLogger.printLine("UAV " + uav.getId()
+                    + " energy exhausted; failing EdgeCloudSim task #"
+                    + edgeTask.getCloudletId());
+            if (simManager.getMobileDeviceManager() instanceof DefaultMobileDeviceManager) {
+                ((DefaultMobileDeviceManager) simManager.getMobileDeviceManager())
+                        .uavTaskFailed(edgeTask);
+            } else {
+                try {
+                    edgeTask.setCloudletStatus(
+                            org.cloudbus.cloudsim.Cloudlet.FAILED_RESOURCE_UNAVAILABLE);
+                } catch (Exception ignored) {
+                    // The coordinator still receives a failed terminal callback below.
+                }
+                simManager.notifyGymTaskSettled(edgeTask);
+            }
+        }
     }
 
     public int getActiveEdgeTaskCount() {
@@ -423,6 +466,7 @@ public class UAVManager {
         SimSettings simSettings = simManager.getSimulationSettings();
         
         for (UAV uav : uavList) {
+            failActiveEdgeTasks(uav);
             // 清空任务队列
             uav.clearTaskQueue();
             

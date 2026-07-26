@@ -65,9 +65,17 @@ class GymBridgeServerTest {
                 "src/test/resources/config/applications.xml",
                 1);
 
-        JSONObject provenance = session.specification().getJSONObject("provenance");
+        JSONObject specification = session.specification();
+        JSONObject provenance = specification.getJSONObject("provenance");
         JSONObject runtime = provenance.getJSONObject("runtime");
 
+        assertEquals("1.2", specification.getString("protocol_version"));
+        assertEquals(4, specification.getJSONObject("action")
+                .getInt("target_count"));
+        assertEquals(1, specification.getJSONObject("observation")
+                .getJSONArray("delta_time_shape").getInt(0));
+        assertEquals(2, specification.getJSONObject("observation")
+                .getJSONArray("resources_shape").getInt(0));
         assertEquals(3, provenance.getJSONObject("environment")
                 .getJSONArray("files").length());
         assertEquals(64, runtime.getString("artifact_sha256").length());

@@ -145,6 +145,15 @@ def _physical_step_metrics(info: Mapping[str, Any]) -> dict[str, float]:
         if not np.isfinite(value) or value < 0.0:
             raise ValueError(f"Invalid physical metric {key}: {value}")
         metrics[key] = value
+    if not np.isclose(
+        metrics["constraint_violations"],
+        metrics["invalid_target_count"] + metrics["boundary_clip_count"],
+    ):
+        raise ValueError("Constraint violation components do not sum to total")
+    if metrics["local_resource_busy_seconds"] > float(
+        info["elapsed_simulation_time"]
+    ) + 1e-9:
+        raise ValueError("Local busy time exceeds transition duration")
     return metrics
 
 
@@ -561,6 +570,12 @@ def audit_episode_results(results: Iterable[EpisodeResult]) -> None:
             value = float(result.physical_metric_sums[key])
             if not np.isfinite(value) or value < 0.0:
                 raise ValueError(f"Invalid episode physical metric {key}")
+        physical = result.physical_metric_sums
+        if not np.isclose(
+            physical["constraint_violations"],
+            physical["invalid_target_count"] + physical["boundary_clip_count"],
+        ):
+            raise ValueError("Constraint violation components do not sum to total")
         expected_audit_metrics = set(AUDIT_STEP_METRICS)
         if set(result.audit_metric_means) != expected_audit_metrics:
             raise ValueError("Evaluation audit metric means are incomplete")

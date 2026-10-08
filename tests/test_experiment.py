@@ -62,6 +62,7 @@ class _ShortEpisodeEnv:
                 "active_backhaul_uploads": 0,
                 "active_backhaul_downloads": 0,
                 "local_resource_utilization": 0.1,
+                "local_resource_busy_seconds": 0.1,
                 "cloud_resource_utilization": 0.2,
                 "uav_resource_utilization": 0.3,
                 "settled_task_latencies_seconds": [1.0],
@@ -76,6 +77,8 @@ class _ShortEpisodeEnv:
                 "deadline_seconds": 4.0,
                 "ue_energy_joules": 0.2,
                 "uav_energy_joules": 0.3,
+                "invalid_target_count": 0.0,
+                "boundary_clip_count": 0.0,
                 "constraint_violations": 0.0,
             },
         )

@@ -100,6 +100,16 @@ restricted to `[-1, 1]`.
 - UAV queue total/maximum;
 - local/cloud/UAV resource utilization.
 
+The raw `constraint_violations` count is the sum of `invalid_target_count`
+and `boundary_clip_count`; the reward's constraint component remains one
+bounded penalty per transition. `local_resource_busy_seconds` integrates the
+configured local-VM CPU demand, capped at each VM's capacity, across the
+simulated interval. `local_resource_utilization` divides that busy time by the
+interval duration; episode summaries divide total busy time by episode time.
+These diagnostics are additive to protocol 1.2. Older formal reports do not
+contain the split counters or integrated busy time and cannot be reconstructed
+from their aggregate fields.
+
 ## Episode and seed semantics
 
 `terminated=True` means every configured task has naturally reached a terminal

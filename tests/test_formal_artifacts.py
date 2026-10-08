@@ -17,7 +17,11 @@ from scripts.run_formal_experiments import (
     _training_is_complete,
     _validate_config,
 )
-from scripts.summarize_formal_experiments import bootstrap_summary, metric_value
+from scripts.summarize_formal_experiments import (
+    bootstrap_summary,
+    metric_value,
+    metrics_for_reports,
+)
 
 
 def test_bootstrap_summary_is_seeded_and_uses_sample_standard_deviation():
@@ -70,6 +74,34 @@ def test_metric_value_preserves_physical_units_and_normalizes_per_settled_task()
     assert metric_value(row, "max_uav_queue_length") == 4.0
     assert metric_value(row, "uav_resource_utilization") == 0.3
     assert metric_value(row, "offload_ratio") == 0.75
+    assert metric_value(row, "local_resource_utilization") == 0.1
+
+    row["physical_metric_sums"].update({
+        "local_resource_busy_seconds": 2.5,
+        "invalid_target_count": 1.0,
+        "boundary_clip_count": 1.0,
+    })
+    assert metric_value(row, "local_resource_utilization") == 0.25
+    assert metric_value(row, "invalid_target_count") == 1.0
+    assert metric_value(row, "boundary_clip_count") == 1.0
+
+
+def test_summary_adds_split_constraints_only_for_complete_new_reports():
+    old = {"physical_metric_sums": {"constraint_violations": 2.0}}
+    new = {"physical_metric_sums": {
+        "constraint_violations": 2.0,
+        "invalid_target_count": 1.0,
+        "boundary_clip_count": 1.0,
+    }}
+    assert "invalid_target_count" not in metrics_for_reports([old, old])
+    assert metrics_for_reports([new, new])[-2:] == (
+        "invalid_target_count", "boundary_clip_count"
+    )
+    with pytest.raises(ValueError, match="mixes split and unsplit"):
+        metrics_for_reports([old, new])
+    new["physical_metric_sums"]["boundary_clip_count"] = 0.0
+    with pytest.raises(ValueError, match="do not sum"):
+        metrics_for_reports([new])
 
 
 def _stats(values):

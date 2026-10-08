@@ -56,10 +56,14 @@ class _TwoStepEnvironment:
                 "deadline_seconds": 4.0,
                 "ue_energy_joules": 0.25,
                 "uav_energy_joules": 2.0,
+                "local_resource_busy_seconds": 0.2,
+                "invalid_target_count": 0,
+                "boundary_clip_count": 0,
                 "constraint_violations": 0,
                 "success": 1.0,
                 "settled_tasks": 1,
                 "simulation_time": 2.0,
+                "elapsed_simulation_time": 2.0,
             },
             {
                 "reward": -0.2,
@@ -67,10 +71,14 @@ class _TwoStepEnvironment:
                 "deadline_seconds": 4.0,
                 "ue_energy_joules": 0.75,
                 "uav_energy_joules": 4.0,
+                "local_resource_busy_seconds": 0.9,
+                "invalid_target_count": 1,
+                "boundary_clip_count": 1,
                 "constraint_violations": 2,
                 "success": 0.0,
                 "settled_tasks": 2,
                 "simulation_time": 5.0,
+                "elapsed_simulation_time": 3.0,
             },
         ]
         frame = frames[self.step_number]
@@ -83,9 +91,13 @@ class _TwoStepEnvironment:
                 "deadline_seconds",
                 "ue_energy_joules",
                 "uav_energy_joules",
+                "local_resource_busy_seconds",
+                "invalid_target_count",
+                "boundary_clip_count",
                 "constraint_violations",
                 "settled_tasks",
                 "simulation_time",
+                "elapsed_simulation_time",
             )
         }
         info["total_tasks"] = 2
@@ -96,7 +108,7 @@ class _TwoStepEnvironment:
             "active_access_downloads": 0.0,
             "active_backhaul_uploads": 0.0,
             "active_backhaul_downloads": 0.0,
-            "local_resource_utilization": 0.1,
+            "local_resource_utilization": 0.1 if self.step_number == 1 else 0.3,
             "cloud_resource_utilization": 0.2,
             "uav_resource_utilization": 0.3,
         })
@@ -130,6 +142,9 @@ def test_evaluate_policy_aggregates_raw_metrics_and_preserves_episode_status():
         "deadline_seconds": 8.0,
         "ue_energy_joules": 1.0,
         "uav_energy_joules": 6.0,
+        "local_resource_busy_seconds": 1.1,
+        "invalid_target_count": 1.0,
+        "boundary_clip_count": 1.0,
         "constraint_violations": 2.0,
     }
     assert results[0].physical_metric_means == {
@@ -137,8 +152,12 @@ def test_evaluate_policy_aggregates_raw_metrics_and_preserves_episode_status():
         "deadline_seconds": 4.0,
         "ue_energy_joules": 0.5,
         "uav_energy_joules": 3.0,
+        "local_resource_busy_seconds": 0.55,
+        "invalid_target_count": 0.5,
+        "boundary_clip_count": 0.5,
         "constraint_violations": 1.0,
     }
+    assert results[0].audit_metric_means["local_resource_utilization"] == pytest.approx(0.22)
     assert results[0].audit_metric_means["uav_queue_length_total"] == 1.5
     assert results[0].audit_metric_maxima["uav_queue_length_max"] == 2.0
     assert results[0].target_ratios["uav"] == 1.0

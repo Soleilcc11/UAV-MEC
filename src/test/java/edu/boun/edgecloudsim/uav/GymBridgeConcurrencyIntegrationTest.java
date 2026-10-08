@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.Calendar;
 
+import org.cloudbus.cloudsim.Cloudlet;
 import org.cloudbus.cloudsim.core.CloudSim;
 import org.json.JSONObject;
 import org.junit.jupiter.api.Test;
@@ -182,10 +183,91 @@ class GymBridgeConcurrencyIntegrationTest {
             assertEquals(0, terminal.getMetrics().getInt("successful_tasks"));
             assertEquals(1,
                     terminal.getMetrics().getInt("constraint_violations"));
+            assertEquals(1,
+                    terminal.getMetrics().getInt("invalid_target_count"));
+            assertEquals(0,
+                    terminal.getMetrics().getInt("boundary_clip_count"));
             assertEquals(1.0, terminal.getRewardComponents()
                     .getDouble("constraint_violations"), 1e-12);
             assertTrue(terminal.getReward() <= -0.30);
 
+            simulationThread.join(5_000);
+            assertFalse(simulationThread.isAlive());
+        } finally {
+            if (CloudSim.running()) {
+                CloudSim.terminateSimulation();
+            }
+            coordinator.close();
+            simulationThread.join(5_000);
+            SimManager.resetInstance();
+        }
+    }
+
+    @Test
+    @Timeout(15)
+    void localCpuUtilizationAndBoundaryClipsAreTrackedBetweenDecisions()
+            throws Exception {
+        SimSettings settings = SimSettings.getInstance();
+        settings.initialize(
+                "src/test/resources/config/simulation_settings.xml",
+                "src/test/resources/config/edge_devices.xml",
+                "src/test/resources/config/applications.xml");
+
+        SimManager.resetInstance();
+        CloudSim.init(1, Calendar.getInstance(), false);
+        UAVMECScenarioFactory factory = new UAVMECScenarioFactory(
+                1, "SINGLE_TIER", "RANDOM_FIT") {
+            @Override
+            public LoadGeneratorModel getLoadGeneratorModel() {
+                return new LoadGeneratorModel(1, 60, "SINGLE_TIER") {
+                    @Override
+                    public void initializeModel() {
+                        taskList = new ArrayList<>();
+                        taskList.add(new TaskProperty(
+                                1.0, 0, 0, 1, 20_000, 100, 20));
+                        taskList.add(new TaskProperty(
+                                2.0, 0, 0, 1, 20_000, 100, 20));
+                    }
+
+                    @Override
+                    public int getTaskTypeOfDevice(int deviceId) {
+                        return 0;
+                    }
+                };
+            }
+        };
+        SimManager manager = SimManager.getInstance();
+        manager.initialize(factory, 1, "SINGLE_TIER", "RANDOM_FIT");
+        GymDecisionCoordinator coordinator = new GymDecisionCoordinator(manager);
+        manager.setGymCoordinator(coordinator);
+
+        Thread simulationThread = new Thread(
+                CloudSim::startSimulation, "gym-local-utilization-test-simulation");
+        simulationThread.start();
+        try {
+            coordinator.awaitInitialObservation(5_000);
+            manager.getUAVManager().getUAVs().get(0).setSpeed(500.0);
+            double[][] movement = zeroMovements(settings.getNumOfUAVs());
+            movement[0][0] = 1.0;
+            coordinator.beginDecision(0, movement);
+            GymDecisionCoordinator.StepResult first =
+                    coordinator.awaitStepResult(5_000);
+
+            assertEquals(Cloudlet.INEXEC, manager.getMobileDeviceManager()
+                    .getCloudletSubmittedList().get(0).getCloudletStatus());
+            assertEquals(1, first.getMetrics().getInt("in_flight_tasks"));
+            assertTrue(first.getMetrics().getDouble("local_resource_utilization") > 0.0);
+            assertTrue(first.getMetrics().getDouble("local_resource_busy_seconds") > 0.0);
+            assertEquals(0, first.getMetrics().getInt("invalid_target_count"));
+            assertEquals(1, first.getMetrics().getInt("boundary_clip_count"));
+            assertEquals(1, first.getMetrics().getInt("constraint_violations"));
+
+            coordinator.beginDecision(0, zeroMovements(settings.getNumOfUAVs()));
+            GymDecisionCoordinator.StepResult terminal =
+                    coordinator.awaitStepResult(10_000);
+            assertTrue(terminal.isTerminated());
+            assertTrue(terminal.getMetrics().getDouble("local_resource_busy_seconds") > 0.0);
+            assertEquals(0, terminal.getMetrics().getInt("boundary_clip_count"));
             simulationThread.join(5_000);
             assertFalse(simulationThread.isAlive());
         } finally {

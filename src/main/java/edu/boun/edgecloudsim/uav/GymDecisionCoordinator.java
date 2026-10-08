@@ -27,6 +27,7 @@ public class GymDecisionCoordinator {
     private final SimManager manager;
     private final Map<Integer, Decision> inFlightDecisions = new HashMap<>();
     private final TransitionAccumulator transition = new TransitionAccumulator();
+    private final TimeWeightedLocalUtilization localUtilization;
     private TaskProperty currentTask;
     private Decision decisionForSimulation;
     private boolean initialDecisionReady;
@@ -48,6 +49,7 @@ public class GymDecisionCoordinator {
 
     public GymDecisionCoordinator(SimManager manager) {
         this.manager = manager;
+        this.localUtilization = new TimeWeightedLocalUtilization(localVmCount());
     }
 
     public synchronized void setTotalTaskCount(int totalTaskCount) {
@@ -149,6 +151,10 @@ public class GymDecisionCoordinator {
             throw new IllegalStateException(
                     "Duplicate in-flight cloudlet id: " + task.getCloudletId());
         }
+        if (decision.target.getType() == ExecutionTarget.Type.LOCAL) {
+            localUtilization.start(task.getCloudletId(), task.getVmId(),
+                    localCpuDemand(task.getTaskType()), CloudSim.clock());
+        }
     }
 
     public synchronized boolean onTaskSettled(Task task) {
@@ -158,6 +164,9 @@ public class GymDecisionCoordinator {
         Decision decision = inFlightDecisions.remove(task.getCloudletId());
         if (decision == null) {
             return false;
+        }
+        if (decision.target.getType() == ExecutionTarget.Type.LOCAL) {
+            localUtilization.finish(task.getCloudletId(), CloudSim.clock());
         }
         settle(decision, task.getCloudletStatus() == Cloudlet.SUCCESS, true);
         return true;
@@ -254,6 +263,9 @@ public class GymDecisionCoordinator {
         double elapsedSimulationTime = Math.max(
                 0.0, simulationTime - lastStepObservationTime);
         lastStepObservationTime = simulationTime;
+        double localBusySeconds = localUtilization.drainBusySeconds(simulationTime);
+        double localIntervalUtilization = elapsedSimulationTime > 0.0
+                ? Math.min(1.0, localBusySeconds / elapsedSimulationTime) : 0.0;
         SimSettings settings = manager.getSimulationSettings();
         double discountTimeUnit = Math.max(
                 Double.MIN_NORMAL, settings.getSmdpDiscountTimeUnitSeconds());
@@ -285,7 +297,8 @@ public class GymDecisionCoordinator {
                 .put("uav_queue_length_max",
                         manager.getUAVManager().getUAVs().stream()
                                 .mapToInt(UAV::getTaskQueueLength).max().orElse(0))
-                .put("local_resource_utilization", averageLocalUtilization())
+                .put("local_resource_utilization", localIntervalUtilization)
+                .put("local_resource_busy_seconds", localBusySeconds)
                 .put("cloud_resource_utilization",
                         averageVmUtilization(resourceVms(
                                 ExecutionTarget.cloud(), 0)))
@@ -323,6 +336,11 @@ public class GymDecisionCoordinator {
         }
         if (!inFlightDecisions.isEmpty()) {
             List<Decision> unfinished = new ArrayList<>(inFlightDecisions.values());
+            for (Map.Entry<Integer, Decision> entry : inFlightDecisions.entrySet()) {
+                if (entry.getValue().target.getType() == ExecutionTarget.Type.LOCAL) {
+                    localUtilization.finish(entry.getKey(), CloudSim.clock());
+                }
+            }
             inFlightDecisions.clear();
             for (Decision decision : unfinished) {
                 settle(decision, false, false);
@@ -603,16 +621,25 @@ public class GymDecisionCoordinator {
                         backhaulPropagation);
     }
 
-    private double averageLocalUtilization() {
-        List<Vm> vms = new ArrayList<>();
+    private int localVmCount() {
+        int count = 0;
         for (int device = 0; device < manager.getNumOfMobileDevice(); device++) {
             List<? extends Vm> deviceVms =
                     manager.getMobileServerManager().getVmList(device);
             if (deviceVms != null) {
-                vms.addAll(deviceVms);
+                count += deviceVms.size();
             }
         }
-        return averageVmUtilization(vms);
+        return count;
+    }
+
+    private double localCpuDemand(int taskType) {
+        double[][] table = manager.getSimulationSettings().getTaskLookUpTable();
+        if (taskType < 0 || taskType >= table.length || table[taskType].length <= 11) {
+            throw new IllegalArgumentException("Missing local CPU demand for task type "
+                    + taskType);
+        }
+        return normalizeUtilization(table[taskType][11]);
     }
 
     private double averageVmUtilization(List<? extends Vm> vms) {
@@ -688,13 +715,18 @@ public class GymDecisionCoordinator {
     }
 
     static JSONObject rawPhysicalMetrics(double latencySeconds, double deadlineSeconds,
-            double ueEnergyJoules, double uavEnergyJoules, int constraintViolations) {
+            double ueEnergyJoules, double uavEnergyJoules,
+            int invalidTargetCount, int boundaryClipCount) {
+        int invalid = Math.max(0, invalidTargetCount);
+        int boundary = Math.max(0, boundaryClipCount);
         return new JSONObject()
                 .put("latency_seconds", Math.max(0.0, latencySeconds))
                 .put("deadline_seconds", Math.max(0.0, deadlineSeconds))
                 .put("ue_energy_joules", Math.max(0.0, ueEnergyJoules))
                 .put("uav_energy_joules", Math.max(0.0, uavEnergyJoules))
-                .put("constraint_violations", Math.max(0, constraintViolations));
+                .put("invalid_target_count", invalid)
+                .put("boundary_clip_count", boundary)
+                .put("constraint_violations", invalid + boundary);
     }
 
     static JSONObject withEpisodeProgress(JSONObject physicalMetrics, int settledTasks,
@@ -792,13 +824,13 @@ public class GymDecisionCoordinator {
         private double ueEnergyJoules;
         private double reward;
         private int settledCount;
-        private int constraintViolations;
+        private int invalidTargetCount;
         private final List<Double> latencySamplesSeconds = new ArrayList<>();
 
         private void add(double taskSuccess, double taskLatencyRatio,
                 double taskUeEnergyRatio, double taskLatencySeconds,
                 double taskDeadlineSeconds, double taskUeEnergyJoules,
-                int taskConstraintViolations) {
+                int taskInvalidTargetCount) {
             success += taskSuccess;
             latencyRatio += taskLatencyRatio;
             ueEnergyRatio += taskUeEnergyRatio;
@@ -806,17 +838,17 @@ public class GymDecisionCoordinator {
             deadlineSeconds += taskDeadlineSeconds;
             ueEnergyJoules += taskUeEnergyJoules;
             latencySamplesSeconds.add(Math.max(0.0, taskLatencySeconds));
-            constraintViolations += Math.max(0, taskConstraintViolations);
+            invalidTargetCount += Math.max(0, taskInvalidTargetCount);
             reward += boundedTaskReward(taskSuccess, taskLatencyRatio, taskUeEnergyRatio);
             settledCount++;
         }
 
         private TransitionSnapshot drain(double intervalUavEnergyJoules,
-                double uavBudgetJoules, int intervalConstraintViolations) {
+                double uavBudgetJoules, int intervalBoundaryClipCount) {
             double uavEnergyRatio = intervalUavEnergyJoules
                     / Math.max(1.0, uavBudgetJoules);
-            int totalConstraintViolations = constraintViolations
-                    + Math.max(0, intervalConstraintViolations);
+            int totalConstraintViolations = invalidTargetCount
+                    + Math.max(0, intervalBoundaryClipCount);
             double boundedConstraintViolations = totalConstraintViolations > 0 ? 1.0 : 0.0;
             JSONObject components = settledCount == 0
                     ? zeroRewardComponents()
@@ -832,7 +864,8 @@ public class GymDecisionCoordinator {
             }
             JSONObject physical = rawPhysicalMetrics(
                     latencySeconds, deadlineSeconds, ueEnergyJoules,
-                    intervalUavEnergyJoules, totalConstraintViolations);
+                    intervalUavEnergyJoules, invalidTargetCount,
+                    intervalBoundaryClipCount);
             JSONArray latencySamples = new JSONArray();
             for (double latency : latencySamplesSeconds) {
                 latencySamples.put(latency);
@@ -851,7 +884,7 @@ public class GymDecisionCoordinator {
             ueEnergyJoules = 0.0;
             reward = 0.0;
             settledCount = 0;
-            constraintViolations = 0;
+            invalidTargetCount = 0;
             latencySamplesSeconds.clear();
             return snapshot;
         }

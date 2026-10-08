@@ -13,15 +13,17 @@ class GymBridgeServerTest {
     @Test
     void stepMetricsExposeRawPhysicalValuesAndEpisodeProgress() {
         JSONObject metrics = GymDecisionCoordinator.withEpisodeProgress(
-                GymDecisionCoordinator.rawPhysicalMetrics(1.25, 4.0, 0.75, 12.5, 2),
+                GymDecisionCoordinator.rawPhysicalMetrics(1.25, 4.0, 0.75, 12.5, 1, 2),
                 3, 8, 9.5);
 
-        assertEquals(8, metrics.length());
+        assertEquals(10, metrics.length());
         assertEquals(1.25, metrics.getDouble("latency_seconds"), 1e-12);
         assertEquals(4.0, metrics.getDouble("deadline_seconds"), 1e-12);
         assertEquals(0.75, metrics.getDouble("ue_energy_joules"), 1e-12);
         assertEquals(12.5, metrics.getDouble("uav_energy_joules"), 1e-12);
-        assertEquals(2, metrics.getInt("constraint_violations"));
+        assertEquals(1, metrics.getInt("invalid_target_count"));
+        assertEquals(2, metrics.getInt("boundary_clip_count"));
+        assertEquals(3, metrics.getInt("constraint_violations"));
         assertEquals(3, metrics.getInt("settled_tasks"));
         assertEquals(8, metrics.getInt("total_tasks"));
         assertEquals(9.5, metrics.getDouble("simulation_time"), 1e-12);

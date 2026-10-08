@@ -21,6 +21,9 @@ PHYSICAL_STEP_METRICS = (
     "deadline_seconds",
     "ue_energy_joules",
     "uav_energy_joules",
+    "local_resource_busy_seconds",
+    "invalid_target_count",
+    "boundary_clip_count",
     "constraint_violations",
 )
 
@@ -324,6 +327,16 @@ def evaluate_policy(env: gym.Env, policy: Policy, seeds: list[int]) -> list[Epis
                 if not np.isfinite(value) or value < 0.0:
                     raise ValueError(f"Invalid physical step metric {key}: {value}")
                 physical_metric_sums[key] += value
+            if not np.isclose(
+                float(info["constraint_violations"]),
+                float(info["invalid_target_count"])
+                + float(info["boundary_clip_count"]),
+            ):
+                raise ValueError("Constraint violation components do not sum to total")
+            if float(info["local_resource_busy_seconds"]) > float(
+                info["elapsed_simulation_time"]
+            ) + 1e-9:
+                raise ValueError("Local busy time exceeds transition duration")
             for key in AUDIT_STEP_METRICS:
                 value = float(info[key])
                 if not np.isfinite(value) or value < 0.0:
@@ -357,6 +370,14 @@ def evaluate_policy(env: gym.Env, policy: Policy, seeds: list[int]) -> list[Epis
             key: value / steps if steps else 0.0
             for key, value in audit_metric_sums.items()
         }
+        simulation_time = float(info["simulation_time"])
+        # The bridge reports an interval time-weighted value. Aggregate local
+        # utilization over simulated time, not over unequal decision intervals.
+        audit_metric_means["local_resource_utilization"] = (
+            physical_metric_sums["local_resource_busy_seconds"] / simulation_time
+            if simulation_time > 0.0
+            else 0.0
+        )
         target_ratios = {
             **{
                 key: count / steps if steps else 0.0
@@ -368,7 +389,6 @@ def evaluate_policy(env: gym.Env, policy: Policy, seeds: list[int]) -> list[Epis
                 else 0.0
             ),
         }
-        simulation_time = float(info["simulation_time"])
         results.append(EpisodeResult(
             policy=policy.name,
             seed=seed,

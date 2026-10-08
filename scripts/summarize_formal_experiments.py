@@ -35,6 +35,7 @@ METRICS = (
     "uav_target_ratio",
     "offload_ratio",
 )
+OPTIONAL_CONSTRAINT_METRICS = ("invalid_target_count", "boundary_clip_count")
 BASELINES = (
     "random_masked",
     "minimum_estimated_delay",
@@ -85,6 +86,8 @@ def metric_value(row: Mapping[str, Any], metric: str) -> float:
         ) / denominator
     elif metric == "constraint_violations":
         value = float(physical["constraint_violations"])
+    elif metric in OPTIONAL_CONSTRAINT_METRICS:
+        value = float(physical[metric])
     elif metric == "throughput_tasks_per_second":
         value = float(row["successful_tasks"]) / float(row["simulation_time"])
     elif metric == "average_uav_queue_length":
@@ -93,6 +96,12 @@ def metric_value(row: Mapping[str, Any], metric: str) -> float:
         value = float(row["audit_metric_maxima"]["uav_queue_length_max"])
     elif metric == "local_resource_utilization":
         value = float(row["audit_metric_means"]["local_resource_utilization"])
+        # Pre-fix reports only contain decision-boundary samples. New reports
+        # carry integrated local busy time, which is the authoritative value.
+        if "local_resource_busy_seconds" in physical:
+            value = float(physical["local_resource_busy_seconds"]) / float(
+                row["simulation_time"]
+            )
     elif metric == "cloud_resource_utilization":
         value = float(row["audit_metric_means"]["cloud_resource_utilization"])
     elif metric == "uav_resource_utilization":
@@ -110,6 +119,26 @@ def metric_value(row: Mapping[str, Any], metric: str) -> float:
     if not np.isfinite(value):
         raise ValueError(f"Non-finite {metric}")
     return value
+
+
+def metrics_for_reports(rows: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
+    presence = {
+        tuple(metric in row["physical_metric_sums"]
+              for metric in OPTIONAL_CONSTRAINT_METRICS)
+        for row in rows
+    }
+    if presence not in ({(False, False)}, {(True, True)}):
+        raise ValueError("Formal matrix mixes split and unsplit constraint reports")
+    if presence == {(False, False)}:
+        return METRICS
+    for row in rows:
+        physical = row["physical_metric_sums"]
+        if not np.isclose(
+            float(physical["constraint_violations"]),
+            sum(float(physical[metric]) for metric in OPTIONAL_CONSTRAINT_METRICS),
+        ):
+            raise ValueError("Constraint components do not sum to total")
+    return METRICS + OPTIONAL_CONSTRAINT_METRICS
 
 
 def bootstrap_summary(
@@ -506,6 +535,19 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
     if reported_environment_hashes != orchestration.get("environment_sha256"):
         raise ValueError("Report environment hashes do not match orchestration")
 
+    evaluation_rows = [
+        row
+        for by_split in candidate_rows.values()
+        for rows in by_split.values()
+        for row in rows
+    ] + [
+        row
+        for by_split in baseline_rows.values()
+        for by_seed in by_split.values()
+        for row in by_seed.values()
+    ]
+    metrics = metrics_for_reports(evaluation_rows)
+
     summaries: dict[str, Any] = {"candidates": {}, "baselines": {}, "paired": {}}
     replicate_means: dict[str, Any] = defaultdict(lambda: defaultdict(dict))
     for algorithm, by_split in candidate_rows.items():
@@ -519,7 +561,7 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
                 raise ValueError(f"{algorithm}/{split} does not have ten training replicates")
             summaries["candidates"][algorithm][split] = {}
             summaries["paired"][algorithm][split] = {}
-            for metric in METRICS:
+            for metric in metrics:
                 values = [
                     float(np.mean([metric_value(row, metric) for row in seed_rows]))
                     for _, seed_rows in sorted(by_training_seed.items())
@@ -548,7 +590,7 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
                         bootstrap_summary(
                             differences,
                             seed=_stable_seed(
-                                algorithm, split, metric, baseline, "paired"
+                                algorithm, split, metric, "paired"
                             ),
                         )
                     )
@@ -559,9 +601,13 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
             summaries["baselines"][baseline][split] = {
                 metric: bootstrap_summary(
                     [metric_value(row, metric) for _, row in sorted(by_seed.items())],
-                    seed=_stable_seed(baseline, split, metric),
+                    # Use common random numbers across baselines.  When two
+                    # policies produce bitwise-identical per-seed values (as
+                    # minimum-delay and local-only do in the formal study),
+                    # their Monte Carlo bootstrap intervals must also match.
+                    seed=_stable_seed("baseline", split, metric),
                 )
-                for metric in METRICS
+                for metric in metrics
             }
 
     payload = {
@@ -578,7 +624,7 @@ def summarize(config_path: Path, output: Path | None = None) -> dict[str, Any]:
         "paired_evaluation_seeds_per_split": 10,
         "environment_hashes": reported_environment_hashes,
         "checkpoint_hashes": checkpoint_hashes,
-        "metrics": list(METRICS),
+        "metrics": list(metrics),
         "training_curves": _summarize_training_curves(training_curves),
         "optimization_curves": _summarize_optimization_curves(
             optimization_curves
@@ -625,6 +671,7 @@ def _format_interval(summary: Mapping[str, Any], metric: str) -> str:
 
 
 def _write_tables(payload: Mapping[str, Any], directory: Path) -> None:
+    metrics = payload["metrics"]
     directory.mkdir(parents=True, exist_ok=True)
     csv_path = directory / "heldout_results.csv"
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
@@ -637,7 +684,7 @@ def _write_tables(payload: Mapping[str, Any], directory: Path) -> None:
             **payload["summaries"]["candidates"],
         }
         for policy, by_split in policies.items():
-            for metric in METRICS:
+            for metric in metrics:
                 summary = by_split["heldout"][metric]
                 writer.writerow(
                     [
@@ -658,6 +705,8 @@ def _write_tables(payload: Mapping[str, Any], directory: Path) -> None:
         "energy_per_settled_task_joules": "Energy/task (J)",
         "throughput_tasks_per_second": "Throughput (task/s)",
         "constraint_violations": "Violations",
+        "invalid_target_count": "Invalid targets",
+        "boundary_clip_count": "Boundary clips",
         "average_uav_queue_length": "Avg UAV queue",
         "max_uav_queue_length": "Max UAV queue",
         "local_resource_utilization": "Local util.",
@@ -679,15 +728,15 @@ def _write_tables(payload: Mapping[str, Any], directory: Path) -> None:
         "intervals use the ten independent training-seed means; baseline intervals "
         "use the ten paired environment seeds.",
         "",
-        "| Policy | " + " | ".join(labels[metric] for metric in METRICS) + " |",
-        "|---|" + "---:|" * len(METRICS),
+        "| Policy | " + " | ".join(labels[metric] for metric in metrics) + " |",
+        "|---|" + "---:|" * len(metrics),
     ]
     for policy, by_split in policies.items():
         lines.append(
             f"| {policy} | "
             + " | ".join(
                 _format_interval(by_split["heldout"][metric], metric)
-                for metric in METRICS
+                for metric in metrics
             )
             + " |"
         )
